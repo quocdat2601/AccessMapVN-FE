@@ -108,7 +108,7 @@ export function ScoreCriteriaExplainer({
                 <Text style={styles.pillarScore}>{hasNoFeatures ? '0 đặc tính' : 'Đã chọn'}</Text>
               </View>
               <Text style={styles.pillarDesc}>
-                Các tiêu chuẩn QCVN 10:2014 bạn tick chọn ở Bước 2 cùng ghi chú hiện trường. Nếu để trống không chọn đặc tính nào, hệ thống giới hạn tối đa 25%.
+                Các tiêu chuẩn QCVN 10:2024/BXD bạn tick chọn ở Bước 2 cùng ghi chú hiện trường. Nếu để trống không chọn đặc tính nào, hệ thống giới hạn tối đa 25%.
               </Text>
             </View>
           </View>

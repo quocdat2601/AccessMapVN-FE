@@ -33,7 +33,7 @@ const FALLBACK_DEMO_ITEMS: ContributionSubmissionRecord[] = [
     mediaUri: 'https://images.unsplash.com/photo-1577495508048-b635879837f1?w=400',
     mediaType: 'photo',
     featureTags: ['Ram dốc', 'Thang máy'],
-    textDescription: 'Lối vào sảnh chính có ram dốc đạt chuẩn QCVN 10:2014',
+    textDescription: 'Lối vào sảnh chính có ram dốc đối chiếu QCVN 10:2024/BXD',
     status: 'Published',
     confidenceScore: 0.94,
     pointsAwarded: 50,
@@ -300,7 +300,7 @@ export function ContributionHistorySheet({ visible, onClose }: ContributionHisto
               <View>
                 <Text style={styles.summaryTier}>Hạng đóng góp: Đồng (Tier 1)</Text>
                 <Text style={styles.summarySub}>
-                  {items.length} lượt đóng góp · Dữ liệu chuẩn hóa QCVN 10:2014
+                  {items.length} lượt đóng góp · Dữ liệu đối chiếu QCVN 10:2024/BXD
                 </Text>
               </View>
             </View>

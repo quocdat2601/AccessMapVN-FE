@@ -329,7 +329,7 @@ export function FinalScorecardScreen({
                 <View style={{ flex: 1, gap: 2 }}>
                   <Text style={styles.criticalWarningTitle}>
                     {flow === 'report'
-                      ? `Độ tin cậy AI thấp (${overallScore}%) - Chưa đạt chuẩn minh chứng`
+                      ? `Độ tin cậy AI thấp (${overallScore}%) - Chưa đủ điều kiện minh chứng`
                       : `Độ tin cậy AI quá thấp (${overallScore}%)`}
                   </Text>
                   <Text style={styles.criticalWarningText}>

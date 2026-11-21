@@ -54,7 +54,7 @@ export function CaptureControls({
         <Text style={styles.recordingHint} numberOfLines={1}>
           {recordingSeconds < 5
             ? `🔴 Đang quay 00:0${recordingSeconds} / 00:10 (Tối thiểu 5s)`
-            : `🟢 Đã đạt chuẩn: ${formatDuration(recordingSeconds)} / 00:10 (Chạm để lưu)`}
+            : `🟢 Đã đủ thời lượng: ${formatDuration(recordingSeconds)} / 00:10 (Chạm để lưu)`}
         </Text>
       ) : null}
 

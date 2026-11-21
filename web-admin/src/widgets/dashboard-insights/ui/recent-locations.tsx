@@ -14,7 +14,7 @@ export function RecentLocations({ data, summary }: { data: PublishedLocation[]; 
         <Badge variant="teal">{coverage}% khu vực</Badge>
       </CardHeader>
       <CardContent className="px-4 pb-4 pt-1">
-        <div className="mb-2"><div className="mb-1.5 flex justify-between text-[11px]"><span className="text-slate-500">Quận/huyện đạt chuẩn</span><strong>{summary.coverageDistricts}/{summary.coverageDistrictsTotal}</strong></div><Progress value={coverage} className="h-1.5" /></div>
+        <div className="mb-2"><div className="mb-1.5 flex justify-between text-[11px]"><span className="text-slate-500">Quận/huyện có dữ liệu</span><strong>{summary.coverageDistricts}/{summary.coverageDistrictsTotal}</strong></div><Progress value={coverage} className="h-1.5" /></div>
         {data.length === 0 ? (
           <p className="py-3 text-xs text-slate-400">Chưa có địa điểm nào xuất bản gần đây.</p>
         ) : (

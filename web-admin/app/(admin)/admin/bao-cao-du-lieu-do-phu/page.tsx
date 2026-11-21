@@ -156,7 +156,7 @@ export default function CoverageReportsPage() {
             Báo cáo Dữ liệu & Độ phủ tiếp cận
           </h1>
           <p className="mt-0.5 text-sm text-slate-500">
-            Theo dõi tỷ lệ địa điểm đã thẩm định theo từng hạng mục QCVN 10:2014 và kết xuất tệp CSV.
+            Theo dõi tỷ lệ địa điểm đã thẩm định theo từng hạng mục QCVN 10:2024/BXD và kết xuất tệp CSV.
           </p>
         </div>
         <Button variant="outline" onClick={triggerReload} disabled={isLoading}>
@@ -205,7 +205,7 @@ export default function CoverageReportsPage() {
             <Card>
               <CardHeader>
                 <CardTitle>Tỷ lệ đáp ứng theo tiêu chí tiếp cận</CardTitle>
-                <CardDescription>Số lượng địa điểm đạt chuẩn trên tổng số địa điểm đang hoạt động</CardDescription>
+                <CardDescription>Số lượng địa điểm có dữ liệu đối chiếu trên tổng số địa điểm đang hoạt động</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {data.featureBreakdown.map((item) => (

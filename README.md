@@ -56,7 +56,7 @@ npm run dev
 ```
 - Mở trình duyệt tại: [http://localhost:3000](http://localhost:3000).
 - Nhấn **Đăng nhập** ở màn hình đăng nhập demo để vào thẳng Dashboard quản trị.
-- **Dữ liệu mẫu có sẵn**: Danh sách hồ sơ đóng góp (`/admin/ho-so-dong-gop`), chi tiết hồ sơ với ảnh hiện trường và bảng đối chiếu quy chuẩn QCVN 10:2014, thống kê biểu đồ hoạt động.
+- **Dữ liệu mẫu có sẵn**: Danh sách hồ sơ đóng góp (`/admin/ho-so-dong-gop`), chi tiết hồ sơ với ảnh hiện trường và bảng đối chiếu quy chuẩn QCVN 10:2024/BXD, thống kê biểu đồ hoạt động.
 
 ---
 

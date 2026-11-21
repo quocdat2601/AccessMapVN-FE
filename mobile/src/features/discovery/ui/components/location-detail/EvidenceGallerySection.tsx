@@ -109,7 +109,7 @@ export function EvidenceGallerySection({
             <View style={styles.specTag}>
               <MaterialCommunityIcons name="slope-uphill" size={11} color="#FFFFFF" />
               <Text style={styles.specTagText}>
-                {isVerified ? 'Độ dốc 1:12 đạt chuẩn QCVN 10' : 'Độ dốc 1:12 đạt chuẩn'}
+                {isVerified ? 'Độ dốc 1:12 đối chiếu QCVN 10:2024' : 'Độ dốc 1:12 có bằng chứng'}
               </Text>
             </View>
           </View>

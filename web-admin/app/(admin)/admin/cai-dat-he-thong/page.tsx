@@ -316,7 +316,7 @@ export default function SystemSettingsPage() {
               • <strong>Không phụ thuộc appsettings:</strong> Mọi ngưỡng nghiệp vụ được tải trực tiếp từ cơ sở dữ liệu cấu hình thông qua Repository Pattern, cho phép cập nhật tức thời (Zero Downtime).
             </p>
             <p>
-              • <strong>Đồng bộ quy chuẩn QCVN 10:2014/BXD:</strong> Các tham số về độ dốc ram dốc, chiều rộng lọt lòng cửa thông thuỷ, kích thước buồng vệ sinh tiếp cận được kiểm tra đối chiếu qua mô-đun AI Vision độc lập.
+              • <strong>Đồng bộ quy chuẩn QCVN 10:2024/BXD:</strong> Các tham số về độ dốc ram dốc, chiều rộng lọt lòng cửa thông thuỷ, kích thước buồng vệ sinh tiếp cận được kiểm tra đối chiếu qua mô-đun AI Vision độc lập.
             </p>
             <p>
               • <strong>Bảo vệ toàn vẹn dữ liệu:</strong> Mọi thay đổi cấu hình được ghi log hệ thống kèm danh tính tài khoản quản trị viên thực hiện.

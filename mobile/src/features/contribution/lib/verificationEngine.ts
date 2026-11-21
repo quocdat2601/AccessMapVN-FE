@@ -60,7 +60,7 @@ export interface VerificationMatrixResult {
       isWithin50m: boolean;
     };
   };
-  // QCVN 10:2014 Persona & Confidence Extensions
+  // QCVN 10:2024/BXD Persona & Confidence Extensions
   personaScores: PersonaScores;
   personaFit: PersonaFitEvaluation;
   dataConfidence: DataConfidenceAssessment;
@@ -114,7 +114,7 @@ export function calculateHaversineDistanceMeters(
 
 /**
  * Evaluates the full multi-modal verification matrix combining Computer Vision,
- * NLP context notes, Spatial Proximity Geofence (<= 50m), and QCVN 10:2014 Persona fits.
+ * NLP context notes, Spatial Proximity Geofence (<= 50m), and QCVN 10:2024/BXD Persona fits.
  */
 export function evaluateVerificationMatrix(
   input: VerificationMatrixInput
@@ -183,7 +183,7 @@ export function evaluateVerificationMatrix(
     overallScore = Math.min(overallScore, 75);
   }
 
-  // ── QCVN 10:2014 Persona Scoring & Penalty Rules ───────────────────────────
+  // ── QCVN 10:2024/BXD Persona Scoring & Penalty Rules ───────────────────────────
   const selectedSet = new Set(input.selectedTags);
   const hasRamp = selectedSet.has('exterior_ramp_present');
   const hasComfortableRamp = selectedSet.has('ramp_slope_comfortable');
@@ -289,7 +289,7 @@ export function evaluateVerificationMatrix(
       ? 'Chưa ghi nhận đặc điểm tiếp cận. Hãy chụp trực diện lối vào, ram dốc hoặc cửa chính.'
       : hasDiscrepancy
       ? 'Ảnh chưa thể hiện đặc tính bạn đã chọn. Vui lòng chụp rõ góc lối vào/ram dốc hoặc chờ kiểm duyệt viên xác minh.'
-      : 'Để thẩm định độ dốc 1/20 tuyệt đối theo QCVN, hãy chụp thêm ảnh góc nghiêng hoặc quay video bước dọc theo dốc.',
+      : 'Để thẩm định độ dốc 1/20 tuyệt đối theo QCVN 10:2024/BXD, hãy chụp thêm ảnh góc nghiêng hoặc quay video bước dọc theo dốc.',
   };
 
   // ── Granular Verification: Verified vs Unverified Feature Counts ──────────

@@ -198,7 +198,7 @@ export function AccessibilitySettingsModal({ visible, onClose }: AccessibilitySe
                   isHighContrast && styles.textHighContrastBold,
                 ]}
               >
-                Tiêu chuẩn QCVN 10:2014 & WCAG 2.1 AAA
+                Tiêu chuẩn QCVN 10:2024/BXD & WCAG 2.2 AA
               </Text>
               <Text style={styles.standardBannerSub}>
                 Cấu hình giúp tối ưu hóa giao diện cho người khiếm thị, người đi xe lăn, người cao tuổi và đa dạng thể trạng.
@@ -274,7 +274,7 @@ export function AccessibilitySettingsModal({ visible, onClose }: AccessibilitySe
                     isHighContrast && { color: '#000000', fontWeight: '800' },
                   ]}
                 >
-                  Ram dốc đạt chuẩn
+                  Ram dốc đối chiếu QCVN
                 </Text>
               </View>
 

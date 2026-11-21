@@ -10,7 +10,7 @@ export interface MockPreScanData {
 
 export const MOCK_PRE_SCAN_SAMPLES: Record<string, MockPreScanData> = {
   highQualityRamp: {
-    summary: 'AI nhận diện sơ bộ: Phát hiện ram dốc tiếp cận đạt chuẩn QCVN 10:2014 và cửa ra vào rộng rãi.',
+    summary: 'AI nhận diện sơ bộ: Phát hiện ram dốc tiếp cận đối chiếu phù hợp QCVN 10:2024/BXD và cửa ra vào rộng rãi.',
     features: [
       { key: 'exterior_ramp_present', label: 'Ram dốc tiếp cận', detected: true, confidence: 0.94 },
       { key: 'door_width_ok', label: 'Cửa rộng ≥80cm', detected: true, confidence: 0.88 },

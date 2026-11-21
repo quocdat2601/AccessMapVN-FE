@@ -49,7 +49,7 @@ const QUICK_REASONS: Record<DisputeDecisionType, string[]> = {
     "Hai báo cáo có góc chụp chưa thấy rõ chiều rộng thông thủy của cửa, đề nghị bổ sung ảnh cận cảnh.",
   ],
   RetainBaseline: [
-    "Sau khi đối chiếu minh chứng thực địa, tiện ích vẫn chưa đáp ứng đầy đủ quy chuẩn QCVN 10:2014 nên giữ nguyên trạng thái gốc.",
+    "Sau khi đối chiếu minh chứng thực địa, tiện ích vẫn chưa đáp ứng đầy đủ tiêu chí kỹ thuật QCVN 10:2024/BXD nên giữ nguyên trạng thái gốc.",
     "Minh chứng báo cáo thay đổi chưa đủ cơ sở xác thực, giữ nguyên trạng thái đã công bố.",
   ],
   LinkCorrection: [
@@ -181,7 +181,7 @@ export function DisputeDetailPage({ id }: { id: string }) {
         aiVisionSummary:
           evidenceItem?.description ||
           (idx === 0
-            ? `YOLOv8 phát hiện biển chỉ dẫn ${featureLabel.toLowerCase()} và tay vịn inox chuẩn QCVN 10:2014 (độ nét 94%, không bị che khuất).`
+            ? `YOLOv8 phát hiện biển chỉ dẫn ${featureLabel.toLowerCase()} và tay vịn inox đối chiếu QCVN 10:2024/BXD (độ nét 94%, không bị che khuất).`
             : `YOLOv8 nhận diện cửa lọt lòng rộng ≥ 900mm, lối tiếp cận phẳng và biển hiệu tiếp cận rõ ràng tại tầng trệt.`),
         aiNlpSummary:
           idx === 0
@@ -766,7 +766,7 @@ export function DisputeDetailPage({ id }: { id: string }) {
                       • <strong>Yêu cầu minh chứng:</strong> Chuyển trạng thái sang chờ người dùng chụp thêm góc ảnh rõ hơn.
                     </li>
                     <li>
-                      • <strong>Giữ dữ liệu gốc:</strong> Bác bỏ các báo cáo mâu thuẫn nếu ảnh minh chứng không đạt chuẩn.
+                      • <strong>Giữ dữ liệu gốc:</strong> Bác bỏ các báo cáo mâu thuẫn nếu ảnh minh chứng không đáp ứng tiêu chí.
                     </li>
                     <li>
                       • <strong>Tạo cảnh báo tạm thời:</strong> Hiển thị băng rôn cảnh báo trên ứng dụng di động khi tiện ích đang bảo trì/sửa chữa.

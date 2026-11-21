@@ -56,7 +56,7 @@ const QUICK_SEARCH_SUGGESTIONS = [
   { id: 'hosp', icon: 'medical', label: 'Bệnh viện & Cơ sở y tế', query: 'Bệnh viện' },
   { id: 'cafe', icon: 'cafe', label: 'Quán Cà phê tiếp cận', query: 'Cà phê' },
   { id: 'mall', icon: 'cart', label: 'TTTM & Siêu thị', query: 'Siêu thị' },
-  { id: 'pharm', icon: 'fitness', label: 'Nhà thuốc đạt chuẩn', query: 'Nhà thuốc' },
+  { id: 'pharm', icon: 'fitness', label: 'Nhà thuốc tiếp cận tốt', query: 'Nhà thuốc' },
   { id: 'transit', icon: 'bus', label: 'Bến xe & Giao thông', query: 'Bến xe' },
 ];
 
@@ -491,7 +491,7 @@ export function DiscoveryScreen({
           </View>
           <View style={styles.legendItem}>
             <View style={[styles.legendDot, { backgroundColor: '#10b981', borderColor: '#059669' }]} />
-            <Text style={styles.legendLabel}>Tiếp cận tốt (đạt chuẩn QCVN 10)</Text>
+            <Text style={styles.legendLabel}>Tiếp cận tốt (đối chiếu QCVN 10)</Text>
           </View>
           <View style={styles.legendItem}>
             <View style={[styles.legendDot, { backgroundColor: '#f59e0b', borderColor: '#d97706' }]} />

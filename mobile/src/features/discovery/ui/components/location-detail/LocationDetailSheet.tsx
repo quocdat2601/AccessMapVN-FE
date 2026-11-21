@@ -583,7 +583,7 @@ export function LocationDetailSheet({
               category={localizedCategory}
               brand={place.brand}
               distanceStr={distanceStr}
-              standardLabel={!isUnrated ? 'Đạt QCVN 10:2014' : undefined}
+              standardLabel={!isUnrated ? 'Đối chiếu QCVN 10:2024' : undefined}
               address={place.address}
               isAddressLoading={place.isAddressLoading}
               openingHours={place.opening_hours}

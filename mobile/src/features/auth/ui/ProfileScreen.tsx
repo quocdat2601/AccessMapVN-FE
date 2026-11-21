@@ -509,7 +509,7 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
             onPress={() =>
               Alert.alert(
                 'Điều khoản & Tiêu chuẩn tiếp cận',
-                'Hệ thống đánh giá mức độ tiếp cận dựa trên Quy chuẩn kỹ thuật quốc gia QCVN 10:2014/BXD (Độ dốc ram ≤ 1/12, Cửa thông thủy ≥ 90cm, Thang máy & Gạch dẫn hướng xúc giác).'
+                'Hệ thống đánh giá mức độ tiếp cận dựa trên Quy chuẩn kỹ thuật quốc gia QCVN 10:2024/BXD (Độ dốc ram ≤ 1/12, Cửa thông thủy ≥ 90cm, Thang máy & Gạch dẫn hướng xúc giác).'
               )
             }
             activeOpacity={0.75}
@@ -578,7 +578,7 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
         <View style={styles.footerTextWrap}>
           <Text style={styles.footerLine1}>AccessMap VN v1.4.2 • Dữ liệu vì cộng đồng</Text>
           <Text style={styles.footerLine2}>
-            Tiêu chuẩn tiếp cận không rào cản Việt Nam QCVN 10:2014
+            Tiêu chuẩn tiếp cận không rào cản Việt Nam QCVN 10:2024/BXD
           </Text>
         </View>
       </ScrollView>

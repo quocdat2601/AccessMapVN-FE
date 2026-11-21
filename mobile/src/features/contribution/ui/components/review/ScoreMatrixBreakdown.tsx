@@ -26,7 +26,7 @@ export function ScoreMatrixBreakdown({
 
   return (
     <View style={styles.container}>
-      {/* ── 1. Persona Fit Evaluation Cards (QCVN 10:2014) ──────────────── */}
+      {/* ── 1. Persona Fit Evaluation Cards (QCVN 10:2024/BXD) ──────────── */}
       {personaScores && personaFit ? (
         <View style={styles.personaSection}>
           <Text style={styles.sectionTitle}>Độ tương thích theo đối tượng sử dụng</Text>

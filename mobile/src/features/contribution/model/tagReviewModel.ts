@@ -1,5 +1,5 @@
 /**
- * QCVN 10:2014/BXD Standard Feature Tag Taxonomy & Review State Model
+ * QCVN 10:2024/BXD Standard Feature Tag Taxonomy & Review State Model
  */
 
 export type FeatureCategory = 'entrance' | 'sanitation' | 'visual' | 'amenity';

@@ -39,7 +39,7 @@ export function runTagReviewTests() {
     console.log('  ✅ Test Case 2: Update and sanitize field notes (PASSED)');
   }
 
-  // Test Case 3: Bộ 18 nhãn QCVN 10:2014 được phân chia đủ 4 hạng mục
+  // Test Case 3: Bộ 18 nhãn QCVN 10:2024/BXD được phân chia đủ 4 hạng mục
   {
     assert.strictEqual(QCVN_FEATURE_TAGS.length, 18);
 
@@ -54,7 +54,7 @@ export function runTagReviewTests() {
 
     const amenityTags = getTagsByCategory('amenity');
     assert.strictEqual(amenityTags.length, 2);
-    console.log('  ✅ Test Case 3: 18 QCVN 10:2014 tags categorized accurately across 4 tabs (PASSED)');
+    console.log('  ✅ Test Case 3: 18 QCVN 10:2024/BXD tags categorized accurately across 4 tabs (PASSED)');
   }
 
   // Test Case 4: Nhận diện chính xác các nhãn vi phạm / chướng ngại vật

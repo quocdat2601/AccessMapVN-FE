@@ -32,7 +32,7 @@ export const MOCK_S901_PLACES: PlaceDto[] = [
     floor_level: 1,
     accessibility_score: 0.96,
     accessibility_note:
-      'Đạt chuẩn QCVN 10:2014: Có ram dốc 1:12, cửa kính tự động rộng 140cm, thang máy có bảng chữ nổi Braille và WC tiếp cận tại tầng sảnh.',
+      'Đối chiếu QCVN 10:2024/BXD: Có ram dốc 1:12, cửa kính tự động rộng 140cm, thang máy có bảng chữ nổi Braille và WC tiếp cận tại tầng sảnh.',
     last_verified_at: '2026-11-10T08:30:00Z',
     legacy_feature_values: {
       ramp: true,

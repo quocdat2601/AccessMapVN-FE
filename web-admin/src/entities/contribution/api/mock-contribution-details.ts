@@ -156,7 +156,7 @@ export function createContributionDetail(record: ContributionRecord): Contributi
       violations: record.contributor.reputationScore > 60 ? 0 : 1,
       reputationDelta: record.status === "published" ? 15 : 0,
     },
-    technicalNotes: ["EXIF được kiểm tra độc lập với nội dung do người dùng khai báo.", "AI chỉ gợi ý vùng quan tâm; quyết định thuộc quy trình kiểm duyệt phía máy chủ trong tương lai.", "Không suy diễn toàn bộ công trình đạt chuẩn từ một hạng mục hình ảnh."],
+    technicalNotes: ["EXIF được kiểm tra độc lập với nội dung do người dùng khai báo.", "AI chỉ gợi ý vùng quan tâm; quyết định thuộc quy trình kiểm duyệt phía máy chủ trong tương lai.", "Không suy diễn toàn bộ công trình tiếp cận từ một hạng mục hình ảnh đơn lẻ."],
     applicableStandards: ["QCVN 10:2024/BXD · Mục 2.2 Lối vào", "QCVN 10:2024/BXD · Mục 2.3 Đường dốc", "WCAG 2.2 AA · Trình bày dữ liệu quản trị"],
   };
 }

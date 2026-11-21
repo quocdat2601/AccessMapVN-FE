@@ -61,7 +61,7 @@ export const VERIFIED_DEMO_REVIEWS: CommunityReview[] = [
     age: '3 ngày trước',
     helpfulCount: 35,
     likesCount: 14,
-    comment: 'Nhà vệ sinh tiếp cận độc lập ở tầng trệt sạch sẽ, trang bị tay vịn trợ lực đạt quy chuẩn QCVN 10:2014.',
+    comment: 'Nhà vệ sinh tiếp cận độc lập ở tầng trệt sạch sẽ, trang bị tay vịn trợ lực đối chiếu quy chuẩn QCVN 10:2024/BXD.',
     status: 'Approved',
   },
   {

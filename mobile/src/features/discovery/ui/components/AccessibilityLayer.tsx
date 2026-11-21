@@ -108,7 +108,7 @@ export function normalizeScore(score: number): number {
 }
 
 export function getAccessibilityColor(normalizedScore: number): string {
-  if (normalizedScore >= 0.7) return '#10b981'; // Xanh lá: Tiếp cận tốt (QCVN 10:2014)
+  if (normalizedScore >= 0.7) return '#10b981'; // Xanh lá: Tiếp cận tốt (đối chiếu QCVN 10:2024/BXD)
   if (normalizedScore >= 0.4) return '#f59e0b'; // Vàng cam: Tiếp cận một phần
   return '#ef4444'; // Đỏ: Khó tiếp cận / có chướng ngại
 }
