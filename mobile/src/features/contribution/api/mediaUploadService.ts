@@ -9,12 +9,38 @@ export interface MediaUploadResponse {
   size: number;
 }
 
+export interface ProposedUploadScope {
+  kind: 'BuildingGeneral' | 'Entrance' | 'Floor' | 'Unit';
+  label: string;
+  floorNumber?: number;
+}
+
+export interface DuplicateSubmissionCandidate {
+  locationId: string;
+  name: string;
+  address?: string | null;
+}
+
+export interface DuplicateLocationChallenge {
+  status: string;
+  action: string;
+  candidates: DuplicateSubmissionCandidate[];
+  confirmationToken: string;
+}
+
+export interface IdentityConfirmationInput {
+  decision: 'UseExisting' | 'ConfirmDistinct';
+  confirmationToken: string;
+  reason: string;
+}
+
 export interface UploadCaptureContext {
   latitude?: number;
   longitude?: number;
   accuracyMeters?: number;
   locationId?: string;
   textDescription?: string;
+  proposedScope?: ProposedUploadScope;
 }
 
 export interface UploadedMediaMetadata {
@@ -137,7 +163,7 @@ async function tryUploadViaBackendIntent(
             ? { locationId: captureContext!.locationId }
             : { proposedPlacePosition: { latitude: lat, longitude: lng } }),
         },
-        proposedScope: { kind: 'BuildingGeneral', label: 'Whole place' },
+        proposedScope: captureContext?.proposedScope ?? { kind: 'BuildingGeneral', label: 'Whole place' },
       },
       { auth: 'optional' }
     );
@@ -326,13 +352,19 @@ export async function submitContributionToBackend(
     text_description?: string;
     [key: string]: unknown;
   },
-  options: { uploadedUrl: string; locationName?: string }
+  options: {
+    uploadedUrl: string;
+    locationName?: string;
+    proposedScope?: ProposedUploadScope;
+    identityConfirmation?: IdentityConfirmationInput;
+  }
 ): Promise<{
   submission_id?: string;
   submission_code?: string;
   status?: string;
   points_awarded?: number;
   message?: string;
+  conflict_challenge?: DuplicateLocationChallenge;
 }> {
   const meta = getUploadedMediaMetadata(options.uploadedUrl);
   const operationId = `submission-create:${legacyPayload.client_submission_id}`;
@@ -374,27 +406,44 @@ export async function submitContributionToBackend(
             longitude: legacyPayload.gps_lng,
             positionSource: 'ContributorProposal',
           }),
-      proposedScope: { kind: 'BuildingGeneral', label: 'Whole place' },
+      proposedScope: options.proposedScope ?? { kind: 'BuildingGeneral', label: 'Whole place' },
       textDescription: legacyPayload.text_description || undefined,
       ...(meta.suggestionCorrelationId
         ? { suggestionCorrelationId: meta.suggestionCorrelationId }
         : {}),
+      ...(options.identityConfirmation
+        ? { identityConfirmation: options.identityConfirmation }
+        : {}),
     };
 
-    const res = await apiClient.postIdempotent<{
-      submissionId?: string;
-      submissionCode?: string;
-      status?: string;
-      message?: string;
-    }>('/api/v1/submissions', contractBBody, operationId, { auth: 'required' });
+    try {
+      const res = await apiClient.postIdempotent<{
+        submissionId?: string;
+        submissionCode?: string;
+        status?: string;
+        message?: string;
+      }>('/api/v1/submissions', contractBBody, operationId, { auth: 'required' });
 
-    return {
-      submission_id: res?.submissionId,
-      submission_code: res?.submissionCode,
-      status: res?.status,
-      points_awarded: 0,
-      message: res?.message,
-    };
+      return {
+        submission_id: res?.submissionId,
+        submission_code: res?.submissionCode,
+        status: res?.status,
+        points_awarded: 0,
+        message: res?.message,
+      };
+    } catch (err: any) {
+      if (
+        err?.status === 409 &&
+        err?.data &&
+        Array.isArray(err.data.candidates) &&
+        typeof err.data.confirmationToken === 'string'
+      ) {
+        return {
+          conflict_challenge: err.data as DuplicateLocationChallenge,
+        };
+      }
+      throw err;
+    }
   }
 
   return await apiClient.post<{

@@ -28,6 +28,7 @@ import { reverseGeocode } from '@/entities/place';
 import { styles } from './CameraContributionScreen.styles';
 import { TagReviewScreen, type UserMeasurementsInput } from './TagReviewScreen';
 import { FinalScorecardScreen } from './FinalScorecardScreen';
+import type { ProposedUploadScope } from '../../api/mediaUploadService';
 import {
   verifyWithAiOrFallback,
   type VerificationMatrixResult,
@@ -133,6 +134,10 @@ function ActiveCameraContributionScreen() {
   const [userObservations, setUserObservations] = useState<Record<string, 'present' | 'absent'>>({});
   const [fieldNotes, setFieldNotes] = useState('');
   const [userMeasurements, setUserMeasurements] = useState<UserMeasurementsInput | null>(null);
+  const [proposedScope, setProposedScope] = useState<ProposedUploadScope>({
+    kind: 'BuildingGeneral',
+    label: 'Whole place',
+  });
   const [matrixResult, setMatrixResult] = useState<VerificationMatrixResult | null>(null);
 
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
@@ -455,6 +460,7 @@ function ActiveCameraContributionScreen() {
     setWorkflowStep('camera');
     setMatrixResult(null);
     setUserObservations({});
+    setProposedScope({ kind: 'BuildingGeneral', label: 'Whole place' });
     setVideoPreviewUri(null);
   }, []);
 
@@ -463,12 +469,16 @@ function ActiveCameraContributionScreen() {
       selectedKeys: string[],
       notes: string,
       measurements?: UserMeasurementsInput,
-      confirmedObservations?: Record<string, 'present' | 'absent'>
+      confirmedObservations?: Record<string, 'present' | 'absent'>,
+      scope?: ProposedUploadScope
     ) => {
       if (!capturedMedia) return;
       setConfirmedTagKeys(selectedKeys);
       setFieldNotes(notes);
       setUserMeasurements(measurements ?? null);
+      if (scope) {
+        setProposedScope(scope);
+      }
       if (confirmedObservations) {
         setUserObservations(confirmedObservations);
       }
@@ -524,6 +534,7 @@ function ActiveCameraContributionScreen() {
           confirmedObservations={userObservations}
           notes={fieldNotes}
           userMeasurements={userMeasurements}
+          proposedScope={proposedScope}
           locationName={targetLocationName}
           locationAddress={targetAddress}
           onChangeLocation={() => setShowLocationModal(true)}
@@ -558,6 +569,7 @@ function ActiveCameraContributionScreen() {
           locationName={targetLocationName}
           locationAddress={targetAddress}
           initialObservations={userObservations as any}
+          initialScope={proposedScope}
           onChangeLocation={() => setShowLocationModal(true)}
           onProceedToVerification={handleProceedToVerification}
           onRetake={handleRetake}

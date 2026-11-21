@@ -27,6 +27,11 @@ export interface UserProfile {
   reputationTier: string;
   contributionsCount: number;
   reportsCount: number;
+  accountStandingScore: number;
+  contributionAccuracyRate: number | null;
+  correctClaimCount: number;
+  incorrectClaimCount: number;
+  participationStatus: string;
   isGuest: boolean;
 }
 
@@ -167,6 +172,11 @@ const DEFAULT_PROFILE_STATS = {
   reputationTier: 'Thành viên mới',
   contributionsCount: 0,
   reportsCount: 0,
+  accountStandingScore: 100,
+  contributionAccuracyRate: null as number | null,
+  correctClaimCount: 0,
+  incorrectClaimCount: 0,
+  participationStatus: 'Normal',
 };
 
 export function AuthProvider({ children }: PropsWithChildren) {
@@ -202,6 +212,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
             reputationTier: rep.rankLabel || rep.rankBadge || 'Thành viên mới',
             contributionsCount: Number(rep.correctClaimCount ?? 0) + Number(rep.incorrectClaimCount ?? 0),
             reportsCount: 0,
+            accountStandingScore: typeof rep.accountStandingScore === 'number' ? rep.accountStandingScore : 100,
+            contributionAccuracyRate: typeof rep.contributionAccuracyRate === 'number' ? rep.contributionAccuracyRate : null,
+            correctClaimCount: Number(rep.correctClaimCount ?? 0),
+            incorrectClaimCount: Number(rep.incorrectClaimCount ?? 0),
+            participationStatus: typeof rep.participationStatus === 'string' ? rep.participationStatus : 'Normal',
           });
         } else {
           setProfileStats(DEFAULT_PROFILE_STATS);
@@ -220,6 +235,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
         reputationTier: data.reputationTier || 'Thành viên mới',
         contributionsCount: data.contributionsCount ?? 0,
         reportsCount: data.reportsCount ?? 0,
+        accountStandingScore: 100,
+        contributionAccuracyRate: null,
+        correctClaimCount: data.contributionsCount ?? 0,
+        incorrectClaimCount: 0,
+        participationStatus: 'Normal',
       });
     } catch {
       // Keep zeroed defaults if backend is unreachable instead of showing fake stats
@@ -345,6 +365,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
         reputationTier: 'Khách',
         contributionsCount: 0,
         reportsCount: 0,
+        accountStandingScore: 100,
+        contributionAccuracyRate: null,
+        correctClaimCount: 0,
+        incorrectClaimCount: 0,
+        participationStatus: 'Normal',
         isGuest: true,
       };
     }
@@ -365,6 +390,11 @@ export function AuthProvider({ children }: PropsWithChildren) {
       reputationTier: profileStats.reputationTier,
       contributionsCount: profileStats.contributionsCount,
       reportsCount: profileStats.reportsCount,
+      accountStandingScore: profileStats.accountStandingScore,
+      contributionAccuracyRate: profileStats.contributionAccuracyRate,
+      correctClaimCount: profileStats.correctClaimCount,
+      incorrectClaimCount: profileStats.incorrectClaimCount,
+      participationStatus: profileStats.participationStatus,
       isGuest: false,
     };
   }, [activeIdentity, user, profileStats]);

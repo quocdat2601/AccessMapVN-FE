@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +9,9 @@ import { apiClient } from '@/shared/api/client';
 import {
   submitContributionToBackend,
   uploadMediaToBackend,
+  type DuplicateLocationChallenge,
+  type IdentityConfirmationInput,
+  type ProposedUploadScope,
 } from '../../api/mediaUploadService';
 import type { VerificationMatrixResult } from '../../lib/verificationEngine';
 import { ScoreMatrixBreakdown } from '../components/review/ScoreMatrixBreakdown';
@@ -37,6 +40,7 @@ interface FinalScorecardScreenProps {
   confirmedObservations?: Record<string, 'present' | 'absent'>;
   notes: string;
   userMeasurements?: UserMeasurementsInput | null;
+  proposedScope?: ProposedUploadScope;
   flow?: string;
   locationName?: string;
   locationAddress?: string | null;
@@ -53,6 +57,7 @@ export function FinalScorecardScreen({
   confirmedObservations,
   notes,
   userMeasurements,
+  proposedScope,
   flow,
   locationName,
   locationAddress,
@@ -93,6 +98,9 @@ export function FinalScorecardScreen({
   } | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isConflictError, setIsConflictError] = useState(false);
+  const [duplicateChallenge, setDuplicateChallenge] = useState<DuplicateLocationChallenge | null>(null);
+  const [confirmDistinctReason, setConfirmDistinctReason] = useState('');
+  const [resolvedLocationIdOverride, setResolvedLocationIdOverride] = useState<string | null>(null);
 
   // Sync draft on mount (preserve clientSubmissionId across sessions)
   React.useEffect(() => {
@@ -153,7 +161,10 @@ export function FinalScorecardScreen({
     }
   };
 
-  const handleSubmit = async () => {
+  const submitContribution = async (override?: {
+    locationId?: string;
+    identityConfirmation?: IdentityConfirmationInput;
+  }) => {
     if (!user) {
       setShowLoginModal(true);
       return;
@@ -162,6 +173,7 @@ export function FinalScorecardScreen({
       setSubmitError('Chưa xác định được tọa độ địa điểm. Vui lòng bật GPS hoặc chọn lại địa điểm.');
       return;
     }
+    const effectiveLocationId = override?.locationId ?? resolvedLocationIdOverride ?? media.locationId ?? 'custom-location';
     setIsSubmitting(true);
     setSubmitError(null);
     setIsConflictError(false);
@@ -194,8 +206,9 @@ export function FinalScorecardScreen({
             latitude: media.gps.latitude,
             longitude: media.gps.longitude,
             accuracyMeters: media.gps?.accuracy ?? 5.0,
-            locationId: media.locationId,
+            locationId: effectiveLocationId,
             textDescription: notes || undefined,
+            proposedScope,
           });
         } catch (uploadErr) {
           console.warn('Could not upload media to server, using local uri fallback', uploadErr);
@@ -204,7 +217,7 @@ export function FinalScorecardScreen({
 
       const payload = {
         client_submission_id: clientSubmissionIdRef.current,
-        location_id: media.locationId || 'custom-location',
+        location_id: effectiveLocationId,
         user_id: user.id,
         media_urls: [uploadedUrl],
         client_observations: selectedTagKeys,
@@ -245,7 +258,14 @@ export function FinalScorecardScreen({
       const res = await submitContributionToBackend(payload, {
         uploadedUrl,
         locationName: media.locationName,
+        proposedScope,
+        identityConfirmation: override?.identityConfirmation,
       });
+
+      if (res?.conflict_challenge) {
+        setDuplicateChallenge(res.conflict_challenge);
+        return;
+      }
 
       if (res && res.submission_id) {
         // Delete draft ONLY when backend confirms submission creation matching current client ID
@@ -259,7 +279,7 @@ export function FinalScorecardScreen({
 
         addContributionRecord({
           id: res.submission_id,
-          locationId: media.locationId,
+          locationId: effectiveLocationId,
           locationName: media.locationName,
           mediaUri: uploadedUrl,
           mediaType: media.type,
@@ -300,6 +320,10 @@ export function FinalScorecardScreen({
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleSubmit = () => {
+    void submitContribution();
   };
 
   const handleScoreAnimationComplete = () => {
@@ -663,6 +687,14 @@ export function FinalScorecardScreen({
                     </Text>
                   </View>
                 ) : null}
+                {proposedScope ? (
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Phạm vi:</Text>
+                    <Text style={styles.detailValue} numberOfLines={1}>
+                      {proposedScope.label} ({proposedScope.kind})
+                    </Text>
+                  </View>
+                ) : null}
                 <View style={styles.tagChipsSection}>
                   <Text style={styles.detailLabel}>
                     Đặc tính đã chọn ({selectedTagLabels.length}):
@@ -839,6 +871,138 @@ export function FinalScorecardScreen({
         visible={showHistorySheet}
         onClose={() => setShowHistorySheet(false)}
       />
+
+      <Modal
+        visible={Boolean(duplicateChallenge)}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setDuplicateChallenge(null)}
+      >
+        <View
+          style={{
+            flex: 1,
+            backgroundColor: 'rgba(15, 23, 42, 0.55)',
+            justifyContent: 'flex-end',
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: '#ffffff',
+              borderTopLeftRadius: 24,
+              borderTopRightRadius: 24,
+              padding: 20,
+              gap: 12,
+              maxHeight: '80%',
+            }}
+          >
+            <Text style={{ fontSize: 16, fontWeight: '800', color: '#0f172a' }}>
+              Phát hiện địa điểm tương tự gần đây
+            </Text>
+            <Text style={{ fontSize: 12.5, color: '#475569', lineHeight: 18 }}>
+              Hệ thống tìm thấy địa điểm trùng khớp hoặc lân cận. Chọn địa điểm có sẵn hoặc xác nhận đây là địa điểm riêng biệt.
+            </Text>
+
+            <ScrollView style={{ maxHeight: 200 }}>
+              {(duplicateChallenge?.candidates ?? []).map((cand) => (
+                <Pressable
+                  key={cand.locationId}
+                  onPress={() => {
+                    const challenge = duplicateChallenge;
+                    setDuplicateChallenge(null);
+                    setResolvedLocationIdOverride(cand.locationId);
+                    if (challenge) {
+                      void submitContribution({
+                        locationId: cand.locationId,
+                        identityConfirmation: {
+                          decision: 'UseExisting',
+                          confirmationToken: challenge.confirmationToken,
+                          reason: 'Chọn địa điểm sẵn có từ danh sách gợi ý trùng lặp.',
+                        },
+                      });
+                    }
+                  }}
+                  style={{
+                    minHeight: 48,
+                    padding: 12,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: '#cbd5e1',
+                    backgroundColor: '#f8fafc',
+                    marginBottom: 8,
+                  }}
+                >
+                  <Text style={{ fontSize: 13.5, fontWeight: '700', color: '#004e58' }}>{cand.name}</Text>
+                  {cand.address ? (
+                    <Text style={{ fontSize: 11.5, color: '#64748b', marginTop: 2 }}>{cand.address}</Text>
+                  ) : null}
+                </Pressable>
+              ))}
+            </ScrollView>
+
+            <TextInput
+              value={confirmDistinctReason}
+              onChangeText={setConfirmDistinctReason}
+              placeholder="Lý do xác nhận địa điểm riêng biệt (>= 10 ký tự)..."
+              placeholderTextColor="#94a3b8"
+              style={{
+                minHeight: 44,
+                borderWidth: 1,
+                borderColor: '#cbd5e1',
+                borderRadius: 12,
+                paddingHorizontal: 12,
+                fontSize: 13,
+                color: '#0f172a',
+              }}
+            />
+
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <Pressable
+                onPress={() => setDuplicateChallenge(null)}
+                style={{
+                  flex: 1,
+                  minHeight: 44,
+                  borderRadius: 12,
+                  backgroundColor: '#f1f5f9',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text style={{ fontWeight: '700', color: '#334155' }}>Đóng</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  const trimmed = confirmDistinctReason.trim();
+                  if (trimmed.length < 10) {
+                    setSubmitError('Vui lòng nhập lý do xác nhận địa điểm mới tối thiểu 10 ký tự.');
+                    return;
+                  }
+                  const challenge = duplicateChallenge;
+                  setDuplicateChallenge(null);
+                  if (challenge) {
+                    void submitContribution({
+                      identityConfirmation: {
+                        decision: 'ConfirmDistinct',
+                        confirmationToken: challenge.confirmationToken,
+                        reason: trimmed,
+                      },
+                    });
+                  }
+                }}
+                style={{
+                  flex: 1.5,
+                  minHeight: 44,
+                  borderRadius: 12,
+                  backgroundColor: '#004e58',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <Text style={{ fontWeight: '700', color: '#ffffff' }}>Xác nhận địa điểm mới</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }

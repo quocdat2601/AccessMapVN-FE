@@ -23,7 +23,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/shared/theme';
 import { loadContributionRecords, syncPendingSubmissionsWithBackend } from '@/entities/contribution';
 import { fetchPlaceEvidence } from '@/entities/place';
-import { resolveServiceUrl } from '@/shared/api/client';
+import { apiClient, resolveServiceUrl } from '@/shared/api/client';
 import { useAuth } from '@/features/auth';
 import { LoginRequiredModal } from '@/shared/ui/LoginRequiredModal';
 import {
@@ -654,6 +654,33 @@ export function LocationDetailSheet({
     };
   }, [isDemo1, isDemo2, myCommentsStorageKey, place.id]);
 
+  const [timelineItems, setTimelineItems] = useState<
+    Array<{ entryId: string; entryType: string; summary: string; effectiveAt: string }>
+  >([]);
+  const [timelineExpanded, setTimelineExpanded] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    async function loadTimeline() {
+      try {
+        const res = await apiClient.get<{
+          items?: Array<{ entryId: string; entryType: string; summary: string; effectiveAt: string }>;
+        }>(`/api/v1/locations/${encodeURIComponent(place.id)}/timeline?pageSize=10`, { auth: 'none' });
+        if (active && Array.isArray(res?.items)) {
+          setTimelineItems(res.items);
+        } else if (active) {
+          setTimelineItems([]);
+        }
+      } catch {
+        if (active) setTimelineItems([]);
+      }
+    }
+    void loadTimeline();
+    return () => {
+      active = false;
+    };
+  }, [place.id]);
+
   // Slide up from bottom and reset subview when place changes
   useEffect(() => {
     translateY.value = sheetHeight;
@@ -853,6 +880,66 @@ export function LocationDetailSheet({
                 showDemoContent={hasDemoCommunityContent}
                 isVerified={isFullyVerified}
               />
+
+              {timelineItems.length > 0 ? (
+                <View
+                  style={{
+                    marginTop: 12,
+                    borderRadius: 14,
+                    borderWidth: 1,
+                    borderColor: '#e2e8f0',
+                    backgroundColor: '#f8fafc',
+                    padding: 12,
+                  }}
+                >
+                  <TouchableOpacity
+                    onPress={() => setTimelineExpanded((v) => !v)}
+                    activeOpacity={0.75}
+                    style={{
+                      minHeight: 44,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel="Lịch sử cập nhật địa điểm"
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <MaterialCommunityIcons name="history" size={18} color="#004e58" />
+                      <Text style={{ fontSize: 13.5, fontWeight: '700', color: '#0f172a' }}>
+                        Lịch sử cập nhật &amp; Thẩm định ({timelineItems.length})
+                      </Text>
+                    </View>
+                    <MaterialCommunityIcons
+                      name={timelineExpanded ? 'chevron-up' : 'chevron-down'}
+                      size={20}
+                      color="#64748b"
+                    />
+                  </TouchableOpacity>
+                  {timelineExpanded ? (
+                    <View style={{ marginTop: 8, gap: 8 }}>
+                      {timelineItems.map((entry) => (
+                        <View
+                          key={entry.entryId}
+                          style={{
+                            borderLeftWidth: 2,
+                            borderLeftColor: '#0d9488',
+                            paddingLeft: 10,
+                            paddingVertical: 2,
+                          }}
+                        >
+                          <Text style={{ fontSize: 12.5, fontWeight: '600', color: '#0f172a' }}>
+                            {entry.summary}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                            {entry.entryType} · {new Date(entry.effectiveAt).toLocaleString('vi-VN')}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
 
               <ContributionCTA
                 locationId={place.id}

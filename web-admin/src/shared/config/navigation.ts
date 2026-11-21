@@ -6,6 +6,7 @@ import {
   FileCheck2,
   FileWarning,
   Gavel,
+  MapPin,
   MessageSquareWarning,
   Settings2,
   ShieldCheck,
@@ -38,6 +39,7 @@ export const navigationGroups: NavigationGroup[] = [
   {
     label: "Nền tảng",
     items: [
+      { label: "Địa điểm & Hợp nhất", href: "/admin/dia-diem", icon: MapPin },
       { label: "Người dùng & Uy tín", href: "/admin/nguoi-dung-uy-tin", icon: UsersRound },
       { label: "Báo cáo dữ liệu & Độ phủ", href: "/admin/bao-cao-du-lieu-do-phu", icon: ChartNoAxesCombined },
     ],

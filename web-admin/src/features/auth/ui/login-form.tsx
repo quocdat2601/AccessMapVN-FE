@@ -1,13 +1,13 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
-import { AlertTriangle, ArrowRight, Eye, EyeOff, LockKeyhole, UserRound } from "lucide-react";
 import { setStoredPortalAuth } from "@/shared/api/api-client";
 import { getApiBaseUrl, isSupabaseConfigured } from "@/shared/config/runtime";
 import { createBrowserSupabaseClient } from "@/shared/lib/supabase/client";
 import { hasAdminClaim } from "@/shared/lib/supabase/proxy";
 import { Button } from "@/shared/ui/button";
+import { AlertTriangle, ArrowRight, Eye, EyeOff, LockKeyhole, UserRound } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { FormEvent, useState } from "react";
 
 function safeNextPath(value?: string) {
   return value?.startsWith("/admin") ? value : "/admin";

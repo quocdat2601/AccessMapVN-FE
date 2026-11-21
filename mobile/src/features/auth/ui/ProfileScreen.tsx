@@ -449,6 +449,43 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
             </View>
           </View>
 
+          {/* Sub-box 3: 3 chỉ số độc lập WF-04 */}
+          <View style={[styles.rewardInnerBox, { gap: 8 }]}>
+            <Text style={styles.rewardBoxLabelGray}>Chỉ số tài khoản WF-04 (3 thước đo độc lập)</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 10, padding: 8 }}>
+                <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Chấp hành</Text>
+                <Text style={{ fontSize: 15, fontWeight: '800', color: '#004F58', marginTop: 2 }}>
+                  {userProfile.accountStandingScore}/100
+                </Text>
+                <Text style={{ fontSize: 10, color: '#475569' }}>{userProfile.participationStatus}</Text>
+              </View>
+              <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 10, padding: 8 }}>
+                <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Độ chính xác</Text>
+                <Text style={{ fontSize: 15, fontWeight: '800', color: '#0F172A', marginTop: 2 }}>
+                  {userProfile.contributionAccuracyRate != null
+                    ? `${(userProfile.contributionAccuracyRate <= 1
+                        ? userProfile.contributionAccuracyRate * 100
+                        : userProfile.contributionAccuracyRate
+                      ).toFixed(0)}%`
+                    : '—'}
+                </Text>
+                <Text style={{ fontSize: 10, color: '#475569' }}>
+                  {userProfile.correctClaimCount} đúng / {userProfile.incorrectClaimCount} sai
+                </Text>
+              </View>
+              <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 10, padding: 8 }}>
+                <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Xếp hạng</Text>
+                <Text style={{ fontSize: 15, fontWeight: '800', color: '#B45309', marginTop: 2 }}>
+                  {displayExpPoints}
+                </Text>
+                <Text style={{ fontSize: 10, color: '#475569' }} numberOfLines={1}>
+                  {displayTier}
+                </Text>
+              </View>
+            </View>
+          </View>
+
           {/* Mint progress banner */}
           <TouchableOpacity
             style={styles.levelUpBanner}

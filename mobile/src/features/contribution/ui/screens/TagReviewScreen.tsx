@@ -17,6 +17,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { CapturedContributionMedia } from '@/entities/contribution';
 import type { PreScanFeatureTag } from '../../api/aiPreScanService';
+import type { ProposedUploadScope } from '../../api/mediaUploadService';
 import { FeatureTagSelector } from '../components/review/FeatureTagSelector';
 import {
   initializeObservationsFromKeys,
@@ -43,12 +44,14 @@ interface TagReviewScreenProps {
   locationName?: string;
   locationAddress?: string | null;
   initialObservations?: ObservationMap;
+  initialScope?: ProposedUploadScope;
   onChangeLocation?: () => void;
   onProceedToVerification: (
     confirmedTagKeys: string[],
     notes: string,
     measurements?: UserMeasurementsInput,
-    confirmedObservations?: Record<string, 'present' | 'absent'>
+    confirmedObservations?: Record<string, 'present' | 'absent'>,
+    scope?: ProposedUploadScope
   ) => void;
   onRetake: () => void;
   onBack: () => void;
@@ -86,6 +89,7 @@ export function TagReviewScreen({
   locationName,
   locationAddress,
   initialObservations,
+  initialScope,
   onChangeLocation,
   onProceedToVerification,
   onRetake,
@@ -142,6 +146,32 @@ export function TagReviewScreen({
   const [doorClearWidthStr, setDoorClearWidthStr] = useState('');
   const [rampHeightStr, setRampHeightStr] = useState('');
   const [rampLengthStr, setRampLengthStr] = useState('');
+  const [scopeKind, setScopeKind] = useState<'BuildingGeneral' | 'Entrance' | 'Floor' | 'Unit'>(
+    initialScope?.kind ?? 'BuildingGeneral'
+  );
+  const [floorNumberStr, setFloorNumberStr] = useState(
+    initialScope?.floorNumber != null ? String(initialScope.floorNumber) : '1'
+  );
+  const [scopeLabelStr, setScopeLabelStr] = useState(initialScope?.label ?? '');
+
+  const resolvedScope = React.useMemo<ProposedUploadScope>(() => {
+    if (scopeKind === 'BuildingGeneral') {
+      return { kind: 'BuildingGeneral', label: scopeLabelStr.trim() || 'Whole place' };
+    }
+    if (scopeKind === 'Entrance') {
+      return { kind: 'Entrance', label: scopeLabelStr.trim() || 'Lối vào chính' };
+    }
+    if (scopeKind === 'Floor') {
+      const parsed = parseInt(floorNumberStr, 10);
+      const floorNum = Number.isFinite(parsed) ? parsed : 1;
+      return {
+        kind: 'Floor',
+        label: scopeLabelStr.trim() || `Tầng ${floorNum}`,
+        floorNumber: floorNum,
+      };
+    }
+    return { kind: 'Unit', label: scopeLabelStr.trim() || 'Khu vực / Phòng' };
+  }, [scopeKind, floorNumberStr, scopeLabelStr]);
 
   // AI suggestions are purely informational badges; they do not overwrite user observations.
   const handleObservationChange = (key: string, state: ObservationState) => {
@@ -184,7 +214,8 @@ export function TagReviewScreen({
         selectedKeys,
         updateFieldNotes('', notes),
         Object.keys(measurements).length > 0 ? measurements : undefined,
-        confirmedObservations
+        confirmedObservations,
+        resolvedScope
       );
     }, 600);
   };
@@ -471,6 +502,75 @@ export function TagReviewScreen({
               )}
             </View>
           )}
+
+          {/* AccessScope Selector */}
+          <View style={styles.card}>
+            <View style={styles.inputHeader}>
+              <MaterialCommunityIcons name="floor-plan" size={16} color="#004e58" />
+              <Text style={styles.inputTitle}>Phạm vi khu vực (AccessScope)</Text>
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+              {(
+                [
+                  { key: 'BuildingGeneral', label: 'Toàn địa điểm' },
+                  { key: 'Entrance', label: 'Lối vào' },
+                  { key: 'Floor', label: 'Theo tầng' },
+                  { key: 'Unit', label: 'Khu / Phòng' },
+                ] as const
+              ).map((opt) => {
+                const active = scopeKind === opt.key;
+                return (
+                  <Pressable
+                    key={opt.key}
+                    onPress={() => setScopeKind(opt.key)}
+                    style={({ pressed }) => [
+                      {
+                        minHeight: 44,
+                        paddingHorizontal: 12,
+                        justifyContent: 'center',
+                        borderRadius: 10,
+                        borderWidth: 1,
+                        borderColor: active ? '#004e58' : '#cbd5e1',
+                        backgroundColor: active ? '#e6f8f5' : '#ffffff',
+                      },
+                      pressed && styles.pressed,
+                    ]}
+                    accessibilityRole="button"
+                    accessibilityLabel={opt.label}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 12.5,
+                        fontWeight: active ? '700' : '500',
+                        color: active ? '#004e58' : '#334155',
+                      }}
+                    >
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {scopeKind === 'Floor' && (
+              <TextInput
+                style={[styles.textInput, { marginTop: 10, minHeight: 44 }]}
+                value={floorNumberStr}
+                onChangeText={setFloorNumberStr}
+                placeholder="Số tầng (VD: 1, 2, -1 cho hầm)"
+                placeholderTextColor="#94a3b8"
+                keyboardType="numbers-and-punctuation"
+                accessibilityLabel="Số tầng"
+              />
+            )}
+            <TextInput
+              style={[styles.textInput, { marginTop: 8, minHeight: 44 }]}
+              value={scopeLabelStr}
+              onChangeText={setScopeLabelStr}
+              placeholder="Nhãn khu vực (VD: Cổng chính, Tầng trệt...)"
+              placeholderTextColor="#94a3b8"
+              accessibilityLabel="Nhãn phạm vi khu vực"
+            />
+          </View>
 
           {/* Optional Field Notes */}
           <View style={styles.card}>
