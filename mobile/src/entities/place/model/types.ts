@@ -13,6 +13,20 @@ export type PoiCategory =
   | 'other'
   | (string & {});
 
+export enum AccessScopeKind {
+  BuildingGeneral = 1,
+  Entrance = 2,
+  Floor = 3,
+  Unit = 4,
+}
+
+export interface AccessScope {
+  id: string;
+  kind: AccessScopeKind;
+  label: string;
+  floorNumber?: number | null;
+}
+
 export interface PlaceDto {
   id: string;
   name: string;
@@ -34,6 +48,7 @@ export interface PlaceDto {
   accessibility_note: string | null;
   floor_level?: number | null;
   building_id?: string | null;
+  scope?: AccessScope | null;
   has_accessible_elevator?: boolean | null;
   has_accessible_parking?: boolean | null;
   has_step_free?: boolean | null;

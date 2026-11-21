@@ -27,7 +27,18 @@ export const verificationOutcomeLabels: Record<VerificationOutcome, string> = {
   not_publishable: "Không đủ điều kiện",
 };
 
-export const accessibilityCategories = ["Lối vào chính", "Ram dốc", "Cửa tự động", "Thang máy", "WC tiếp cận", "Lối xúc giác", "Bãi đỗ xe ưu tiên", "Lối vào phẳng"] as const;
+export const accessibilityCategories = [
+  "Đường dốc",
+  "Cửa & Lối vào",
+  "Lối đi nội bộ",
+  "Thang máy",
+  "Cầu thang",
+  "Khu vệ sinh",
+  "Bãi đỗ xe",
+  "Quầy phục vụ",
+  "Chỉ dẫn & Cảnh báo",
+  "Lối thoát hiểm",
+] as const;
 
 export function formatWaitingTime(minutes: number) {
   if (minutes <= 0) return "Đã hoàn tất";

@@ -12,14 +12,35 @@ export type ClaimDecision = "pending" | "approved" | "needs_more_info" | "reject
 export type TimelineEventType = "submitted" | "ai_completed" | "review_started" | "info_requested" | "reminder_sent" | "published" | "rejected";
 
 export type AccessibilityCategory =
-  | "Lối vào chính"
-  | "Ram dốc"
-  | "Cửa tự động"
+  | "Đường dốc"
+  | "Cửa & Lối vào"
+  | "Lối đi nội bộ"
   | "Thang máy"
-  | "WC tiếp cận"
-  | "Lối xúc giác"
-  | "Bãi đỗ xe ưu tiên"
-  | "Lối vào phẳng";
+  | "Cầu thang"
+  | "Khu vệ sinh"
+  | "Bãi đỗ xe"
+  | "Quầy phục vụ"
+  | "Chỉ dẫn & Cảnh báo"
+  | "Lối thoát hiểm";
+
+export enum AccessScopeKind {
+  BuildingGeneral = 1,
+  Entrance = 2,
+  Floor = 3,
+  Unit = 4,
+}
+
+export type AccessScopeCoverageStatus = "Known" | "Unknown";
+
+export interface AccessScopeDto {
+  id: string;
+  locationId: string;
+  parentScopeId?: string;
+  kind: AccessScopeKind;
+  label: string;
+  floorNumber?: number;
+  coverageStatus: AccessScopeCoverageStatus;
+}
 
 export interface ContributionPlace {
   id: string;
@@ -108,6 +129,7 @@ export interface LocationIntegrity {
   longitude: number;
   gpsAccuracyMeters: number;
   surveyArea: string;
+  scope?: AccessScopeDto;
   mismatchMeters?: number;
   warning?: string;
   mapHref?: string;

@@ -9,14 +9,16 @@ import type {
 } from "../model/types";
 
 const featureCopy: Record<AccessibilityCategory, { standard: string; claim: string; ai: string }> = {
-  "Lối vào chính": { standard: "Lối đi rộng tối thiểu 900 mm", claim: "Lối vào chính không có bậc cản", ai: "Nhận diện lối đi phẳng và không thấy vật cản cố định" },
-  "Ram dốc": { standard: "Độ dốc không vượt quá 1:12", claim: "Ram dốc rộng 1,4 m, có tay vịn hai bên", ai: "Nhận diện tay vịn kép và độ dốc ước tính 7,8%" },
-  "Cửa tự động": { standard: "Chiều rộng thông thủy trên 900 mm", claim: "Cửa trượt tự động, không có ngưỡng cản", ai: "Phát hiện cửa cảm biến và mặt sàn bằng phẳng" },
-  "Thang máy": { standard: "Buồng thang đáp ứng không gian xe lăn", claim: "Thang máy có nút bấm thấp và ký hiệu nổi", ai: "Nhận diện bảng điều khiển thấp và cửa rộng" },
-  "WC tiếp cận": { standard: "Có khoảng quay xe lăn và tay vịn", claim: "WC có tay vịn và khoảng trống chuyển vị", ai: "Không thể đo chính xác khoảng quay từ một góc ảnh" },
-  "Lối xúc giác": { standard: "Dải dẫn hướng liên tục, tương phản", claim: "Có dải dẫn hướng từ lối vào đến sảnh", ai: "Dải xúc giác được nhận diện liên tục trong khung hình" },
-  "Bãi đỗ xe ưu tiên": { standard: "Vị trí gần lối vào và có ký hiệu", claim: "Có ô đỗ xe ưu tiên gần cửa chính", ai: "Nhận diện ký hiệu xe lăn trên mặt đường" },
-  "Lối vào phẳng": { standard: "Không có chênh cốt gây cản trở", claim: "Lối vào bằng phẳng, không có bậc", ai: "Mặt sàn được nhận diện đồng mức" },
+  "Đường dốc": { standard: "Độ dốc không vượt quá 1:12 (QCVN 10:2024 Mục 2.3)", claim: "Đường dốc rộng 1,4 m, có tay vịn hai bên", ai: "Nhận diện tay vịn kép và độ dốc ước tính 7,8%" },
+  "Cửa & Lối vào": { standard: "Chiều rộng thông thủy lọt lòng tối thiểu 900 mm (Mục 2.2)", claim: "Cửa trượt tự động mở rộng, không có gờ cản", ai: "Phát hiện cửa trượt cảm biến và mặt phẳng đồng mức" },
+  "Lối đi nội bộ": { standard: "Mặt sàn bằng phẳng, không trơn trượt, bề rộng thông thủy ≥ 1200 mm (Mục 2.1)", claim: "Hành lang rộng rãi, không có vật cản cố định", ai: "Nhận diện hành lang rộng và thông thoáng" },
+  "Thang máy": { standard: "Kích thước buồng thang ≥ 1100x1400 mm, nút bấm thấp và ký hiệu nổi (Mục 2.4)", claim: "Thang máy có nút bấm thấp, màn hình và âm thanh thông báo", ai: "Nhận diện bảng điều khiển thấp và cửa mở tự động" },
+  "Cầu thang": { standard: "Bậc thang có gờ chống trượt, tay vịn liên tục hai bên (Mục 2.4)", claim: "Cầu thang bộ có dải cảnh báo thị giác và tay vịn kép", ai: "Nhận diện bậc cầu thang có viền tương phản" },
+  "Khu vệ sinh": { standard: "Buồng vệ sinh tiếp cận độc lập có tay vịn và khoảng quay xe lăn ≥ 1500 mm (Mục 2.5)", claim: "WC tiếp cận có cửa mở ra ngoài, tay vịn trợ lực bên bồn cầu", ai: "Phát hiện buồng WC rộng rãi có lắp thanh tay vịn an toàn" },
+  "Bãi đỗ xe": { standard: "Có ô đỗ xe ưu tiên gần lối vào, kẻ vạch và biển báo chuẩn (Mục 2.6)", claim: "Có ô đỗ xe ưu tiên sơn biểu tượng tiếp cận cạnh cửa sảnh", ai: "Nhận diện biểu tượng xe lăn trên mặt sàn bãi đỗ" },
+  "Quầy phục vụ": { standard: "Có đoạn quầy hạ thấp ≤ 800 mm cho người ngồi xe lăn (Mục 2.7)", claim: "Quầy lễ tân có mặt bàn thấp phục vụ người dùng xe lăn", ai: "Nhận diện đoạn quầy hạ thấp tiếp cận thuận tiện" },
+  "Chỉ dẫn & Cảnh báo": { standard: "Dải xúc giác dẫn hướng liên tục và biển báo trực quan/Braille (Mục 2.8)", claim: "Có dải gạch xúc giác từ vỉa hè dẫn thẳng vào quầy thông tin", ai: "Nhận diện dải gạch xúc giác cảnh báo liên tục" },
+  "Lối thoát hiểm": { standard: "Lối thoát nạn không có bậc cản, cửa mở theo chiều thoát (Mục 2.9)", claim: "Cửa thoát hiểm có thanh đẩy panic bar, lối ra phẳng", ai: "Nhận diện cửa thoát hiểm có đèn báo và thanh đẩy tiêu chuẩn" },
 };
 
 function decisionFor(status: ContributionStatus, index: number) {
@@ -126,7 +128,15 @@ export function createContributionDetail(record: ContributionRecord): Contributi
       latitude: record.place.city === "TP.HCM" ? 10.77375 : 21.0245,
       longitude: record.place.city === "TP.HCM" ? 106.7011 : 105.8412,
       gpsAccuracyMeters: record.priority === "high" ? 45 : 1.8,
-      surveyArea: record.place.name.includes("Saigon Centre") ? "Lối vào phụ Pasteur" : "Lối vào chính",
+      surveyArea: record.place.name.includes("Saigon Centre") ? "Lối vào phụ Pasteur (Tầng 1)" : "Lối vào chính (Sảnh trệt)",
+      scope: {
+        id: `scope-${record.id}`,
+        locationId: record.place.id,
+        kind: record.categories.some(c => c.includes("Lối vào") || c.includes("Đường dốc")) ? 2 : 1, // 2: Entrance, 1: BuildingGeneral
+        label: record.place.name.includes("Saigon Centre") ? "Lối vào phụ Pasteur (Tầng 1)" : "Khu vực sảnh đón chính",
+        floorNumber: 1,
+        coverageStatus: "Known",
+      },
       mismatchMeters: record.priority === "high" ? 45 : undefined,
       warning: record.priority === "high" ? "Vị trí media cách tọa độ tâm cơ sở khoảng 45 m; cần đối soát góc nhìn thực tế." : undefined,
       mapHref: `https://www.openstreetmap.org/?mlat=${record.place.city === "TP.HCM" ? 10.77375 : 21.0245}&mlon=${record.place.city === "TP.HCM" ? 106.7011 : 105.8412}`,
