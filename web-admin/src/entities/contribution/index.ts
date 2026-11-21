@@ -30,5 +30,7 @@ export type {
   RequestMoreInfoInput,
   ReviseClaimAssessmentInput,
   TimelineEventType,
+  UserClaim,
   VerificationOutcome,
+  VisualSuggestion,
 } from "./model/types";

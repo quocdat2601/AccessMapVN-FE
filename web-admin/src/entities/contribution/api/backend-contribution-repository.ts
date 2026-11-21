@@ -31,16 +31,94 @@ function buildQueryString(query: ContributionQueueQuery = {}) {
   return str ? `?${str}` : "";
 }
 
+function isRouteUnavailable(err: unknown): boolean {
+  if (!err || typeof err !== "object" || !("status" in err)) return false;
+  const status = (err as { status: number }).status;
+  return status === 404 || status === 405;
+}
+
+function normalizePendingQueue(
+  raw: { items?: Array<{ submissionId?: string; submissionCode?: string; locationId?: string; revision?: number }> },
+  pageSize: number,
+): ContributionQueueResponse {
+  const rawItems = Array.isArray(raw?.items) ? raw.items : [];
+  const nowIso = new Date().toISOString();
+  const items = rawItems.map((item) => ({
+    id: String(item.submissionId ?? item.submissionCode ?? ""),
+    submittedAt: nowIso,
+    attemptLabel: `Lần gửi ${item.revision ?? 1}`,
+    submissionSequence: item.revision ?? 1,
+    type: "place_update" as const,
+    reason: "new_accessibility_data" as const,
+    place: {
+      id: String(item.locationId ?? ""),
+      name: item.submissionCode ? `Hồ sơ ${item.submissionCode}` : "Địa điểm khảo sát",
+      address: "",
+      district: "",
+      city: "",
+    },
+    contributor: {
+      id: "contributor",
+      name: "Người đóng góp",
+      initials: "NC",
+      reputationScore: 50,
+      avatarTone: "teal" as const,
+    },
+    categories: [],
+    verification: {
+      confidence: 0,
+      outcome: "needs_review" as const,
+      note: "Chờ kiểm duyệt viên đối chiếu",
+    },
+    status: "pending" as const,
+    priority: "normal" as const,
+    waitingMinutes: 0,
+    evidenceCount: 0,
+  }));
+
+  return {
+    items,
+    total: items.length,
+    page: 1,
+    pageSize,
+    totalPages: 1,
+    summary: {
+      total: items.length,
+      awaitingDecision: items.length,
+      needsSupplement: 0,
+      processed: 0,
+      published: 0,
+      rejected: 0,
+      active: items.length,
+      warnings: 0,
+      waitingOverSla: 0,
+      newPlaces: 0,
+    },
+    updatedAt: nowIso,
+    slaTargetMinutes: 120,
+  };
+}
+
 class BackendContributionRepository implements ContributionRepository {
   async getQueue(
     query: ContributionQueueQuery = {},
     signal?: AbortSignal,
   ): Promise<ContributionQueueResponse> {
-    const response = await apiRequest<ContributionQueueResponse>(
-      `/api/v1/admin/submissions${buildQueryString(query)}`,
-      { signal },
-    );
-    return response.data;
+    try {
+      const response = await apiRequest<ContributionQueueResponse>(
+        `/api/v1/admin/submissions${buildQueryString(query)}`,
+        { signal },
+      );
+      return response.data;
+    } catch (err: unknown) {
+      if (!isRouteUnavailable(err)) throw err;
+      const limit = Math.min(50, Math.max(1, query.pageSize ?? 20));
+      const fallback = await apiRequest<{ items?: Array<Record<string, unknown>> }>(
+        `/api/v1/admin/submissions/pending?limit=${limit}`,
+        { signal },
+      );
+      return normalizePendingQueue(fallback.data, limit);
+    }
   }
 
   async getById(id: string, signal?: AbortSignal): Promise<ContributionDetail | null> {
@@ -73,25 +151,60 @@ class BackendContributionRepository implements ContributionRepository {
   }
 
   async approve(id: string, input: ApproveContributionInput): Promise<ContributionDetail> {
-    const response = await apiRequest<ContributionDetail>(
-      `/api/v1/admin/submissions/${encodeURIComponent(id)}/approve`,
-      {
-        method: "POST",
-        body: input,
-      },
-    );
-    return response.data;
+    const idempotencyKey = crypto.randomUUID();
+    try {
+      const response = await apiRequest<ContributionDetail>(
+        `/api/v1/admin/submissions/${encodeURIComponent(id)}/approve`,
+        {
+          method: "POST",
+          body: input,
+          idempotencyKey,
+        },
+      );
+      return response.data;
+    } catch (err: unknown) {
+      if (!err || typeof err !== "object" || !("status" in err) || ((err as { status: number }).status !== 400 && (err as { status: number }).status !== 422)) {
+        throw err;
+      }
+      const response = await apiRequest<ContributionDetail>(
+        `/api/v1/admin/submissions/${encodeURIComponent(id)}/approve`,
+        {
+          method: "POST",
+          body: {
+            approvedClaimIds: input.claimIds,
+            reason: input.note,
+          },
+          idempotencyKey: crypto.randomUUID(),
+        },
+      );
+      return response.data;
+    }
   }
 
   async requestMoreInfo(id: string, input: RequestMoreInfoInput): Promise<ContributionDetail> {
-    const response = await apiRequest<ContributionDetail>(
-      `/api/v1/admin/submissions/${encodeURIComponent(id)}/request-info`,
-      {
-        method: "POST",
-        body: input,
-      },
-    );
-    return response.data;
+    const idempotencyKey = crypto.randomUUID();
+    try {
+      const response = await apiRequest<ContributionDetail>(
+        `/api/v1/admin/submissions/${encodeURIComponent(id)}/request-info`,
+        {
+          method: "POST",
+          body: input,
+          idempotencyKey,
+        },
+      );
+      return response.data;
+    } catch (err: unknown) {
+      if (!isRouteUnavailable(err)) throw err;
+      const response = await apiRequest<ContributionDetail>(
+        `/api/v1/admin/submissions/${encodeURIComponent(id)}/request-more-info`,
+        {
+          method: "POST",
+          body: { reason: input.instructions },
+          idempotencyKey,
+        },
+      );
+      return response.data;
+    }
   }
 
   async reject(id: string, reason: string): Promise<ContributionDetail> {
@@ -100,6 +213,7 @@ class BackendContributionRepository implements ContributionRepository {
       {
         method: "POST",
         body: { reason },
+        idempotencyKey: crypto.randomUUID(),
       },
     );
     return response.data;
@@ -117,6 +231,7 @@ class BackendContributionRepository implements ContributionRepository {
           decision: ModerationDecision.ReviseClaimAssessment,
           ...input,
         },
+        idempotencyKey: crypto.randomUUID(),
       }
     );
     return response.data;

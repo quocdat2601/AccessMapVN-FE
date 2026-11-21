@@ -1,10 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  experimental: {
-    agentUpgrade: "security",
-  },
   poweredByHeader: false,
+  experimental: {
+    agentUpgrade: false,
+  },
   turbopack: {
     root: process.cwd(),
   },

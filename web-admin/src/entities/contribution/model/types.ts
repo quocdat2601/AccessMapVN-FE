@@ -2,8 +2,8 @@ export type ContributionStatus = "pending" | "needs_supplement" | "published" | 
 export type ContributionType = "new_place" | "place_update";
 export type ContributionReason = "new_accessibility_data" | "information_update" | "evidence_correction";
 export type ContributionPriority = "normal" | "high";
-export type ContributionSort = "oldest" | "newest" | "lowest_confidence" | "highest_reputation";
-export type ContributionQueueView = "all" | "waiting_long" | "warning" | "new_place";
+export type ContributionSort = "newest" | "oldest" | "highest_confidence" | "lowest_confidence" | "highest_reputation";
+export type ContributionQueueView = "all" | "fast_track" | "waiting_long" | "warning" | "new_place";
 export type ContributionDateFilter = "all" | "today" | "7d" | "30d";
 export type ContributionWarningFilter = "all" | "warning" | "over_sla";
 export type VerificationOutcome = "needs_review" | "matched" | "missing_evidence" | "needs_cross_check" | "publishable" | "not_publishable";
@@ -21,7 +21,14 @@ export type AccessibilityCategory =
   | "Bãi đỗ xe"
   | "Quầy phục vụ"
   | "Chỉ dẫn & Cảnh báo"
-  | "Lối thoát hiểm";
+  | "Lối thoát hiểm"
+  | "Lối vào chính"
+  | "Ram dốc"
+  | "Cửa tự động"
+  | "WC tiếp cận"
+  | "Lối xúc giác"
+  | "Bãi đỗ xe ưu tiên"
+  | "Lối vào phẳng";
 
 export enum AccessScopeKind {
   BuildingGeneral = 1,
@@ -47,7 +54,7 @@ export interface ContributionPlace {
   name: string;
   address: string;
   district: string;
-  city: "TP.HCM" | "Hà Nội";
+  city: string;
 }
 
 export interface ContributorSummary {
@@ -70,6 +77,9 @@ export interface ContributionRecord {
   id: string;
   submittedAt: string;
   attemptLabel: string;
+  submissionSequence?: number;
+  resubmissionCount?: number;
+  previousSubmissionCode?: string;
   type: ContributionType;
   reason: ContributionReason;
   place: ContributionPlace;
@@ -88,11 +98,27 @@ export interface EvidenceAiFinding {
   tone: "positive" | "warning" | "critical" | "neutral";
 }
 
+export interface VisualSuggestion {
+  feature: string;
+  value: string;
+  detectorScore?: number;
+  bboxFormat?: string;
+  coordinateSpace?: string;
+  bboxNormalized?: [number, number, number, number]; // [xmin, ymin, xmax, ymax]
+}
+
+export interface UserClaim {
+  feature: string;
+  claim: string;
+  snippet?: string;
+}
+
 export interface ContributionEvidence {
   id: string;
   type: EvidenceType;
   title: string;
   url: string;
+  posterUrl?: string;
   capturedAt: string;
   device: string;
   resolution: string;
@@ -101,6 +127,7 @@ export interface ContributionEvidence {
   geotagStatus: "valid" | "mismatch" | "missing";
   description: string;
   aiFindings: EvidenceAiFinding[];
+  visualSuggestions?: VisualSuggestion[];
 }
 
 export interface AiClaimAssessment {
@@ -142,6 +169,17 @@ export interface ContributionTimelineEvent {
   description: string;
   occurredAt: string;
   actor: string;
+}
+
+export interface ModerationLogRecord {
+  id: string;
+  action: string;
+  decisionNote?: string;
+  moderatorName: string;
+  createdAt: string;
+  claimIds?: string[];
+  outcome?: string;
+  evidenceRefs?: string[];
 }
 
 export interface InformationRequest {
@@ -195,11 +233,13 @@ export interface ContributionDetail extends ContributionRecord {
   evidence: ContributionEvidence[];
   claims: AccessibilityClaim[];
   timeline: ContributionTimelineEvent[];
+  moderationLogs?: ModerationLogRecord[];
   informationRequest?: InformationRequest;
   moderationDecision?: ModerationDecisionRecord;
   contributorHistory: ContributorHistorySummary;
   technicalNotes: string[];
   applicableStandards: string[];
+  userClaims?: UserClaim[];
 }
 
 export interface RequestMoreInfoInput {
