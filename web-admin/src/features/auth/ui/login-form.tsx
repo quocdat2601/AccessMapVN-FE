@@ -3,6 +3,8 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, ArrowRight, Eye, EyeOff, LockKeyhole, UserRound } from "lucide-react";
+import { setStoredPortalAuth } from "@/shared/api/api-client";
+import { getApiBaseUrl, isSupabaseConfigured } from "@/shared/config/runtime";
 import { createBrowserSupabaseClient } from "@/shared/lib/supabase/client";
 import { hasAdminClaim } from "@/shared/lib/supabase/proxy";
 import { Button } from "@/shared/ui/button";
@@ -47,13 +49,48 @@ export function LoginForm({
     const password = String(form.get("password") ?? "");
 
     try {
-      const supabase = createBrowserSupabaseClient();
-      const { data: signInData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
-      if (authError) throw authError;
+      let portalSignedIn = false;
+      const apiBaseUrl = getApiBaseUrl();
+      if (apiBaseUrl) {
+        try {
+          const portalRes = await fetch(`${apiBaseUrl}/api/v1/admin/auth/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ identifier: email, password }),
+          });
+          if (portalRes.ok) {
+            const portalData = (await portalRes.json()) as {
+              accessToken?: string;
+              csrfToken?: string;
+              sessionId?: string;
+            };
+            if (portalData?.accessToken) {
+              setStoredPortalAuth({
+                accessToken: portalData.accessToken,
+                csrfToken: portalData.csrfToken,
+                sessionId: portalData.sessionId,
+              });
+              portalSignedIn = true;
+            }
+          }
+        } catch {
+          // Fall back to direct Supabase auth for legacy monorepo backend
+        }
+      }
 
-      if (!hasAdminClaim({ app_metadata: signInData.user?.app_metadata })) {
-        await supabase.auth.signOut();
-        throw new Error("Tài khoản của bạn không có quyền truy cập hệ thống quản trị.");
+      if (isSupabaseConfigured()) {
+        const supabase = createBrowserSupabaseClient();
+        const { data: signInData, error: authError } = await supabase.auth.signInWithPassword({ email, password });
+        if (authError && !portalSignedIn) throw authError;
+
+        if (!authError && signInData.user && !hasAdminClaim({ app_metadata: signInData.user.app_metadata })) {
+          await supabase.auth.signOut();
+          setStoredPortalAuth(null);
+          throw new Error("Tài khoản của bạn không có quyền truy cập hệ thống quản trị.");
+        }
+      } else if (!portalSignedIn) {
+        throw new Error("Không thể xác thực qua máy chủ quản trị.");
       }
 
       router.replace(safeNextPath(nextPath));

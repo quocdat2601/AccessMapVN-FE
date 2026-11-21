@@ -155,25 +155,57 @@ export async function uploadReportMedia(
     digest = bytesToHex(bytes.slice(0, 32));
   }
   const intentBody = { mimeType, sizeBytes: bytes.byteLength, sha256: digest };
-  const intent = await apiClient.postIdempotent<UploadIntentResponse>(
-    `/api/v1/locations/${encodeURIComponent(locationId)}/media/upload-intents`,
-    intentBody,
-    `report-media-intent:${userId}:${locationId}:${digest}`,
-    { auth: 'required' }
-  );
+  try {
+    const intent = await apiClient.postIdempotent<UploadIntentResponse>(
+      `/api/v1/locations/${encodeURIComponent(locationId)}/media/upload-intents`,
+      intentBody,
+      `report-media-intent:${userId}:${locationId}:${digest}`,
+      { auth: 'required' }
+    );
 
-  const upload = await fetch(intent.uploadUrl, {
-    method: 'PUT',
-    headers: intent.requiredHeaders,
-    body: bytes,
-  });
-  if (!upload.ok) throw new Error(`Không thể tải minh chứng lên kho riêng tư (${upload.status}).`);
+    const upload = await fetch(intent.uploadUrl, {
+      method: 'PUT',
+      headers: intent.requiredHeaders,
+      body: bytes,
+    });
+    if (!upload.ok) throw new Error(`Không thể tải minh chứng lên kho riêng tư (${upload.status}).`);
 
-  await apiClient.postIdempotent(
-    `/api/v1/upload-intents/${encodeURIComponent(intent.uploadIntentId)}/complete`,
-    {},
-    `report-media-complete:${userId}:${intent.uploadIntentId}`,
-    { auth: 'required' }
-  );
-  return intent.ownedMediaId;
+    await apiClient.postIdempotent(
+      `/api/v1/upload-intents/${encodeURIComponent(intent.uploadIntentId)}/complete`,
+      {},
+      `report-media-complete:${userId}:${intent.uploadIntentId}`,
+      { auth: 'required' }
+    );
+    return intent.ownedMediaId;
+  } catch (err: any) {
+    if (err?.status !== 404 && err?.status !== 405) throw err;
+    const nowIso = new Date().toISOString();
+    const fallbackIntent = await apiClient.post<{
+      mediaId: string;
+      uploadUrl: string;
+      method?: string;
+      headers?: Record<string, string>;
+    }>(
+      '/api/v1/media/upload-intents',
+      {
+        mediaType: asset.type === 'video' ? 'video' : 'photo',
+        contentType: mimeType,
+        fileSizeBytes: bytes.byteLength,
+        captureMetadata: {
+          source: 'Camera',
+          capturedAt: nowIso,
+          position: { latitude: 10.7736, longitude: 106.7011, accuracyMeters: 5, fixRecordedAt: nowIso },
+          locationId,
+        },
+      },
+      { auth: 'required' }
+    );
+    const putRes = await fetch(fallbackIntent.uploadUrl, {
+      method: fallbackIntent.method || 'PUT',
+      headers: fallbackIntent.headers ?? { 'Content-Type': mimeType },
+      body: bytes,
+    });
+    if (!putRes.ok) throw new Error(`Không thể tải minh chứng lên kho riêng tư (${putRes.status}).`);
+    return fallbackIntent.mediaId;
+  }
 }

@@ -47,6 +47,39 @@ interface ApiRequestOptions extends Omit<RequestInit, "body" | "headers"> {
   headers?: HeadersInit;
 }
 
+const PORTAL_AUTH_STORAGE_KEY = "accessmap_admin_portal_auth";
+
+export interface StoredPortalAuth {
+  accessToken: string;
+  csrfToken?: string;
+  sessionId?: string;
+}
+
+export function getStoredPortalAuth(): StoredPortalAuth | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(PORTAL_AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredPortalAuth;
+    return parsed?.accessToken ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredPortalAuth(auth: StoredPortalAuth | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (!auth) {
+      window.sessionStorage.removeItem(PORTAL_AUTH_STORAGE_KEY);
+      return;
+    }
+    window.sessionStorage.setItem(PORTAL_AUTH_STORAGE_KEY, JSON.stringify(auth));
+  } catch {
+    // Ignore sessionStorage restrictions
+  }
+}
+
 function normalizePath(path: string) {
   return path.startsWith("/") ? path : `/${path}`;
 }
@@ -95,25 +128,44 @@ export async function apiRequest<T>(
     });
   }
 
-  const supabase = createBrowserSupabaseClient();
-  const { data, error } = await supabase.auth.getSession();
-  if (error || !data.session?.access_token) {
+  const portalAuth = getStoredPortalAuth();
+  let bearerToken = portalAuth?.accessToken;
+
+  if (!bearerToken) {
+    const supabase = createBrowserSupabaseClient();
+    const { data, error } = await supabase.auth.getSession();
+    if (!error && data.session?.access_token) {
+      bearerToken = data.session.access_token;
+    }
+  }
+
+  if (!bearerToken) {
     throw new ApiError(401, {
       code: "AUTHENTICATION_REQUIRED",
       message: "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.",
     });
   }
 
+  const method = (options.method ?? "GET").toUpperCase();
   const headers = new Headers(options.headers);
   headers.set("Accept", "application/json");
-  headers.set("Authorization", `Bearer ${data.session.access_token}`);
+  headers.set("Authorization", `Bearer ${bearerToken}`);
+  if (portalAuth?.csrfToken) headers.set("X-CSRF-TOKEN", portalAuth.csrfToken);
   if (options.body !== undefined) headers.set("Content-Type", "application/json");
   if (options.etag) headers.set("If-Match", options.etag);
-  if (options.idempotencyKey) headers.set("Idempotency-Key", options.idempotencyKey);
+  if (options.idempotencyKey) {
+    headers.set("Idempotency-Key", options.idempotencyKey);
+  } else if (
+    (method === "POST" || method === "PATCH" || method === "PUT" || method === "DELETE") &&
+    !headers.has("Idempotency-Key")
+  ) {
+    headers.set("Idempotency-Key", crypto.randomUUID());
+  }
 
   const response = await fetch(`${apiBaseUrl}${normalizePath(path)}`, {
     ...options,
     headers,
+    credentials: portalAuth ? "include" : options.credentials,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     cache: "no-store",
   });

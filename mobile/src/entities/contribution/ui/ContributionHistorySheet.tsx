@@ -94,14 +94,19 @@ export function ContributionHistorySheet({ visible, onClose }: ContributionHisto
   const fetchRecords = async () => {
     setIsLoading(true);
     try {
-      // 1. Try real backend endpoint GET /api/v1/submissions/mine
-      const res = await apiClient.get<any[]>('/api/v1/submissions/mine');
-      if (Array.isArray(res) && res.length > 0) {
-        const mapped: ContributionSubmissionRecord[] = res.map((r) => ({
-          id: String(r.id || r.submission_code),
+      // 1. Try real backend endpoint GET /api/v1/submissions/mine (supports both array and { items } page)
+      const res = await apiClient.get<any>('/api/v1/submissions/mine');
+      const rows: any[] = Array.isArray(res)
+        ? res
+        : Array.isArray(res?.items)
+          ? res.items
+          : [];
+      if (rows.length > 0) {
+        const mapped: ContributionSubmissionRecord[] = rows.map((r) => ({
+          id: String(r.submissionId || r.id || r.submission_code || ''),
           submissionCode: r.submission_code || r.submissionCode ? String(r.submission_code || r.submissionCode) : undefined,
-          locationId: String(r.place_id || r.placeId || ''),
-          locationName: String(r.location_name || r.locationName || 'Địa điểm khảo sát'),
+          locationId: String(r.locationId || r.place_id || r.placeId || ''),
+          locationName: String(r.location_name || r.locationName || r.submissionCode || 'Địa điểm khảo sát'),
           mediaUri: (r.media_urls && r.media_urls[0]) || (r.mediaUrls && r.mediaUrls[0]) || '',
           mediaType: 'photo',
           featureTags: r.feature_tags || r.featureTags || [],
@@ -109,7 +114,11 @@ export function ContributionHistorySheet({ visible, onClose }: ContributionHisto
           status: (r.status as any) || 'Submitted',
           confidenceScore: Number(r.confidence_score ?? r.confidenceScore ?? 0),
           pointsAwarded: r.points_awarded ?? r.pointsAwarded ?? 0,
-          createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+          createdAt: r.createdAt
+            ? new Date(r.createdAt).getTime()
+            : r.created_at
+              ? new Date(r.created_at).getTime()
+              : Date.now(),
           revision: r.revision ?? 1,
           resubmissionCount: r.resubmission_count ?? r.resubmissionCount ?? 0,
           moderatorNote: r.moderator_note || r.moderatorNote,
@@ -155,7 +164,15 @@ export function ContributionHistorySheet({ visible, onClose }: ContributionHisto
           onPress: async () => {
             setActionInProgressId(item.id);
             try {
-              await apiClient.post(`/api/v1/submissions/${item.id}/cancel`, {});
+              const opKey =
+                typeof globalThis.crypto?.randomUUID === 'function'
+                  ? globalThis.crypto.randomUUID()
+                  : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+              await apiClient.post(
+                `/api/v1/submissions/${encodeURIComponent(item.id)}/cancel`,
+                { reason: 'Người đóng góp hủy hồ sơ.' },
+                { idempotencyKey: opKey }
+              );
             } catch {
               // Local update fallback
             }
@@ -202,10 +219,47 @@ export function ContributionHistorySheet({ visible, onClose }: ContributionHisto
   const submitResubmission = async (item: ContributionSubmissionRecord, note: string) => {
     setActionInProgressId(item.id);
     try {
-      await apiClient.post(`/api/v1/submissions/${item.id}/resubmit`, {
-        contributor_note: note,
-        text_description: `${item.textDescription || ''} [Bổ sung]: ${note}`,
-      });
+      const opKey =
+        typeof globalThis.crypto?.randomUUID === 'function'
+          ? globalThis.crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const statusDetail = await apiClient
+        .get<{ submission?: { version?: number; revision?: number } }>(
+          `/api/v1/submissions/${encodeURIComponent(item.id)}/status`
+        )
+        .catch(() => null);
+      const expectedVersion = statusDetail?.submission?.version;
+      try {
+        await apiClient.post(
+          `/api/v1/submissions/${encodeURIComponent(item.id)}/resubmit`,
+          {
+            contributor_note: note,
+            text_description: `${item.textDescription || ''} [Bổ sung]: ${note}`,
+          },
+          {
+            idempotencyKey: opKey,
+            ...(expectedVersion ? { headers: { 'If-Match': `"${expectedVersion}"` } } : {}),
+          }
+        );
+      } catch {
+        // Fallback to AccessMapVN-Backend ResubmitSubmissionInput shape when legacy fields are disallowed
+        await apiClient.post(
+          `/api/v1/submissions/${encodeURIComponent(item.id)}/resubmit`,
+          {
+            expectedRevision: statusDetail?.submission?.revision ?? item.revision ?? 1,
+            mediaIds: [],
+            accessibilityClaims: [
+              { featureType: 'Ramp', claimedStatus: 'Unknown', description: note },
+            ],
+            textDescription: `${item.textDescription || ''} [Bổ sung]: ${note}`,
+            contributorNote: note,
+          },
+          {
+            idempotencyKey: opKey,
+            ...(expectedVersion ? { headers: { 'If-Match': `"${expectedVersion}"` } } : {}),
+          }
+        );
+      }
       setItems((prev) =>
         prev.map((sub) =>
           sub.id === item.id

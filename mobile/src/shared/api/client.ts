@@ -6,6 +6,38 @@ import { supabase } from '@/shared/lib/supabase';
 
 type AuthMode = 'none' | 'optional' | 'required';
 
+const BACKEND_AUTH_STORAGE_KEY = '@accessmap_backend_auth_tokens';
+
+export interface StoredBackendTokens {
+  accessToken: string;
+  refreshToken?: string;
+  sessionId?: string;
+  expiresAt?: number;
+}
+
+export async function setStoredBackendTokens(tokens: StoredBackendTokens | null): Promise<void> {
+  if (!tokens) {
+    await AsyncStorage.removeItem(BACKEND_AUTH_STORAGE_KEY).catch(() => {});
+    return;
+  }
+  await AsyncStorage.setItem(BACKEND_AUTH_STORAGE_KEY, JSON.stringify(tokens)).catch(() => {});
+}
+
+export async function getStoredBackendAccessToken(): Promise<string | null> {
+  try {
+    const raw = await AsyncStorage.getItem(BACKEND_AUTH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredBackendTokens;
+    if (!parsed?.accessToken) return null;
+    if (typeof parsed.expiresAt === 'number' && Date.now() >= parsed.expiresAt - 10_000) {
+      return null;
+    }
+    return parsed.accessToken;
+  } catch {
+    return null;
+  }
+}
+
 export interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | null | undefined>;
   auth?: AuthMode;
@@ -112,6 +144,9 @@ function responseMessage(status: number, data: ApiErrorBody | string): string {
 
 async function accessToken(auth: AuthMode): Promise<string | null> {
   if (auth === 'none') return null;
+
+  const backendToken = await getStoredBackendAccessToken();
+  if (backendToken) return backendToken;
 
   const { data, error } = await supabase.auth.getSession();
   if (error && auth === 'required') throw new AuthenticationRequiredError();

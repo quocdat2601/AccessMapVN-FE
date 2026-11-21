@@ -6,7 +6,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ContributionHistorySheet, addContributionRecord, type CapturedContributionMedia } from '@/entities/contribution';
 import { QCVN_FEATURE_TAGS } from '../../model/tagReviewModel';
 import { apiClient } from '@/shared/api/client';
-import { uploadMediaToBackend } from '../../api/mediaUploadService';
+import {
+  submitContributionToBackend,
+  uploadMediaToBackend,
+} from '../../api/mediaUploadService';
 import type { VerificationMatrixResult } from '../../lib/verificationEngine';
 import { ScoreMatrixBreakdown } from '../components/review/ScoreMatrixBreakdown';
 import { ScoreMeterRing } from '../components/review/ScoreMeterRing';
@@ -187,7 +190,13 @@ export function FinalScorecardScreen({
       let uploadedUrl = media.uri;
       if (media.uri.startsWith('file:') || media.uri.startsWith('content:')) {
         try {
-          uploadedUrl = await uploadMediaToBackend(media.uri, media.base64);
+          uploadedUrl = await uploadMediaToBackend(media.uri, media.base64, {
+            latitude: media.gps.latitude,
+            longitude: media.gps.longitude,
+            accuracyMeters: media.gps?.accuracy ?? 5.0,
+            locationId: media.locationId,
+            textDescription: notes || undefined,
+          });
         } catch (uploadErr) {
           console.warn('Could not upload media to server, using local uri fallback', uploadErr);
         }
@@ -233,7 +242,10 @@ export function FinalScorecardScreen({
         confidence_score: overallScore / 100,
       };
 
-      const res = await apiClient.post<any>('/api/v1/submissions', payload);
+      const res = await submitContributionToBackend(payload, {
+        uploadedUrl,
+        locationName: media.locationName,
+      });
 
       if (res && res.submission_id) {
         // Delete draft ONLY when backend confirms submission creation matching current client ID

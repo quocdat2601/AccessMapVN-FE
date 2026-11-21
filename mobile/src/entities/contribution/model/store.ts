@@ -53,21 +53,46 @@ export async function syncPendingSubmissionsWithBackend(): Promise<ContributionS
   if (ids.length === 0) return [...submissionHistory];
 
   try {
-    const statuses = await apiClient.get<
-      Array<{
-        submission_id: string;
-        id: string;
-        client_submission_id?: string;
-        status: string;
-        points_awarded: number;
-      }>
-    >(`/api/v1/submissions/status?ids=${encodeURIComponent(ids.join(','))}`);
+    let statuses: Array<{
+      submission_id?: string;
+      submissionId?: string;
+      id?: string;
+      client_submission_id?: string;
+      status: string;
+      points_awarded?: number;
+    }> = [];
+
+    try {
+      statuses = await apiClient.get<typeof statuses>(
+        `/api/v1/submissions/status?ids=${encodeURIComponent(ids.join(','))}`
+      );
+    } catch {
+      const resolved = await Promise.all(
+        ids.map((id) =>
+          apiClient
+            .get<{ submission?: { submissionId?: string; status?: string } }>(
+              `/api/v1/submissions/${encodeURIComponent(id)}/status`
+            )
+            .catch(() => null)
+        )
+      );
+      statuses = resolved
+        .filter((item): item is NonNullable<typeof item> => Boolean(item?.submission?.status))
+        .map((item) => ({
+          submission_id: item.submission!.submissionId,
+          status: item.submission!.status!,
+        }));
+    }
 
     if (Array.isArray(statuses) && statuses.length > 0) {
       let changed = false;
       for (const item of statuses) {
         const record = submissionHistory.find(
-          (r) => r.id === item.submission_id || r.id === item.id || r.id === item.client_submission_id
+          (r) =>
+            r.id === item.submission_id ||
+            r.id === item.submissionId ||
+            r.id === item.id ||
+            r.id === item.client_submission_id
         );
         if (record) {
           const rawStatus = (item.status || '').toLowerCase();

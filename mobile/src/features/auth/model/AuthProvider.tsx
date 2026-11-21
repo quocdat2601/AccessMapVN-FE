@@ -9,7 +9,11 @@ import {
   useState,
 } from 'react';
 
-import { apiClient } from '@/shared/api/client';
+import {
+  apiClient,
+  getStoredBackendAccessToken,
+  setStoredBackendTokens,
+} from '@/shared/api/client';
 import { isSupabaseConfigured, supabase } from '@/shared/lib/supabase';
 
 export interface UserProfile {
@@ -167,18 +171,27 @@ const DEFAULT_PROFILE_STATS = {
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const [session, setSession] = useState<Session | null>(null);
+  const [backendUser, setBackendUser] = useState<{ id: string; email: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [profileStats, setProfileStats] = useState(DEFAULT_PROFILE_STATS);
 
   const refreshProfile = useCallback(async () => {
-    if (!session?.access_token) {
+    const backendToken = await getStoredBackendAccessToken();
+    const hasToken = Boolean(session?.access_token || backendToken);
+    if (!hasToken) {
       setProfileStats(DEFAULT_PROFILE_STATS);
       return;
     }
 
     try {
       try {
-        await apiClient.get<any>('/api/v1/me', { auth: 'required' });
+        const me = await apiClient.get<{ id?: string; displayName?: string; email?: string }>(
+          '/api/v1/me',
+          { auth: 'required' }
+        );
+        if (me?.id && !session?.user) {
+          setBackendUser({ id: me.id, email: me.email || '' });
+        }
         const rep = await apiClient
           .get<any>('/api/v1/me/reputation', { auth: 'required' })
           .catch(() => null);
@@ -212,7 +225,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       // Keep zeroed defaults if backend is unreachable instead of showing fake stats
       setProfileStats(DEFAULT_PROFILE_STATS);
     }
-  }, [session?.access_token]);
+  }, [session?.access_token, session?.user]);
 
   useEffect(() => {
     void refreshProfile();
@@ -247,10 +260,43 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    requireConfiguration();
+    let backendSignedIn = false;
+    try {
+      const tokens = await apiClient.post<{
+        accessToken?: string;
+        refreshToken?: string;
+        expiresIn?: number;
+        sessionId?: string;
+      }>('/api/v1/auth/login', { identifier: email, password }, { auth: 'none' });
+      if (tokens?.accessToken) {
+        await setStoredBackendTokens({
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          sessionId: tokens.sessionId,
+          expiresAt:
+            typeof tokens.expiresIn === 'number'
+              ? Date.now() + tokens.expiresIn * 1000
+              : undefined,
+        });
+        setBackendUser({ id: tokens.sessionId || email, email });
+        backendSignedIn = true;
+      }
+    } catch {
+      // Fall back to direct Supabase password sign-in for legacy monorepo backend
+    }
+
+    if (!isSupabaseConfigured) {
+      if (backendSignedIn) {
+        await refreshProfile();
+        return;
+      }
+      requireConfiguration();
+    }
+
     const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-  }, []);
+    if (error && !backendSignedIn) throw error;
+    if (backendSignedIn) await refreshProfile();
+  }, [refreshProfile]);
 
   const signUp = useCallback(async (email: string, password: string, fullName?: string) => {
     requireConfiguration();
@@ -270,15 +316,24 @@ export function AuthProvider({ children }: PropsWithChildren) {
   }, []);
 
   const signOut = useCallback(async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+    const backendToken = await getStoredBackendAccessToken();
+    if (backendToken) {
+      await apiClient.post('/api/v1/auth/logout', undefined, { auth: 'optional' }).catch(() => {});
+      await setStoredBackendTokens(null);
+    }
+    setBackendUser(null);
+    if (isSupabaseConfigured) {
+      const { error } = await supabase.auth.signOut();
+      if (error && !backendToken) throw error;
+    }
   }, []);
 
   const user = session?.user ?? null;
-  const isGuest = !user;
+  const activeIdentity = user ?? backendUser;
+  const isGuest = !activeIdentity;
 
   const userProfile = useMemo<UserProfile>(() => {
-    if (!user) {
+    if (!activeIdentity) {
       return {
         id: 'guest',
         email: '',
@@ -294,16 +349,17 @@ export function AuthProvider({ children }: PropsWithChildren) {
       };
     }
 
-    const metaName = user.user_metadata?.full_name || user.user_metadata?.name;
-    const fallbackName = user.email ? user.email.split('@')[0] : 'Thành viên';
+    const metaName = user?.user_metadata?.full_name || user?.user_metadata?.name;
+    const emailStr = activeIdentity.email || '';
+    const fallbackName = emailStr ? emailStr.split('@')[0] : 'Thành viên';
     const fullName = metaName || fallbackName;
 
     return {
-      id: user.id,
-      email: user.email || '',
+      id: activeIdentity.id,
+      email: emailStr,
       fullName,
-      avatarUrl: user.user_metadata?.avatar_url || null,
-      role: (user.app_metadata?.role as string) || 'Người dùng đã xác thực',
+      avatarUrl: user?.user_metadata?.avatar_url || null,
+      role: (user?.app_metadata?.role as string) || 'Người dùng đã xác thực',
       expPoints: profileStats.expPoints,
       reputationScore: profileStats.reputationScore,
       reputationTier: profileStats.reputationTier,
@@ -311,7 +367,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       reportsCount: profileStats.reportsCount,
       isGuest: false,
     };
-  }, [user, profileStats]);
+  }, [activeIdentity, user, profileStats]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
