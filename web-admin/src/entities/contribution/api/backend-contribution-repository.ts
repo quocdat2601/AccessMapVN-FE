@@ -424,4 +424,17 @@ class BackendContributionRepository implements ContributionRepository {
   }
 }
 
+export async function retryAdminAiVerificationJob(
+  jobId: string,
+  reason: string,
+  submissionId?: string,
+): Promise<void> {
+  await apiRequest<unknown>(`/api/v1/admin/ai-jobs/${encodeURIComponent(jobId)}/retry`, {
+    method: "POST",
+    body: { reason: reason.trim() },
+    etag: submissionId ? etagBySubmissionId.get(submissionId) : undefined,
+    idempotencyKey: crypto.randomUUID(),
+  });
+}
+
 export const backendContributionRepository = new BackendContributionRepository();

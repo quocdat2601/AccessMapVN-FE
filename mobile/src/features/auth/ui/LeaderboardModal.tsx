@@ -40,6 +40,7 @@ interface MyReputationResponse {
   expPoints: number;
   contributionsCount: number;
   recentEvents: {
+    scoreType?: string;
     delta: number;
     newScore: number;
     reason: string;
@@ -169,6 +170,7 @@ export function LeaderboardContent({ isGuest }: LeaderboardContentProps) {
               contributionsCount: Number(ownerRep.correctClaimCount ?? 0) + Number(ownerRep.incorrectClaimCount ?? 0),
               recentEvents: Array.isArray(ownerRep.history)
                 ? ownerRep.history.map((h: any) => ({
+                    scoreType: String(h.scoreType ?? 'ReputationPoints'),
                     delta: Number(h.appliedDelta ?? 0),
                     newScore: Number(h.balanceAfter ?? 0),
                     reason: String(h.sourceType ?? h.sourceOutcome ?? 'Cập nhật uy tín'),
@@ -237,6 +239,56 @@ export function LeaderboardContent({ isGuest }: LeaderboardContentProps) {
               <Text style={styles.myStatValue}>{myRep.trustWeight}x</Text>
               <Text style={styles.myStatSub}>{myRep.reputationTier}</Text>
             </View>
+          </View>
+        </View>
+      )}
+
+      {!isGuest && myRep && myRep.recentEvents.length > 0 && (
+        <View style={styles.mySummaryCard}>
+          <Text style={styles.mySummaryLabel}>LỊCH SỬ BIẾN ĐỘNG ĐIỂM & UY TÍN (WF-04)</Text>
+          <View style={{ gap: 8 }}>
+            {myRep.recentEvents.slice(0, 5).map((ev, index) => {
+              const isStanding = ev.scoreType === 'AccountStandingScore';
+              const formattedDate = ev.occurredAt
+                ? new Date(ev.occurredAt).toLocaleString('vi-VN')
+                : 'Gần đây';
+              const deltaText = ev.delta >= 0 ? `+${ev.delta}` : `${ev.delta}`;
+              return (
+                <View
+                  key={`${ev.occurredAt}-${ev.reason}-${index}`}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    borderTopWidth: index === 0 ? 0 : 1,
+                    borderTopColor: '#F1F5F9',
+                    paddingTop: index === 0 ? 0 : 8,
+                    gap: 8,
+                  }}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>
+                      {ev.reason}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                      {isStanding ? 'Điểm chấp hành' : 'Điểm uy tín'} · {formattedDate}
+                    </Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text
+                      style={{
+                        fontSize: 13.5,
+                        fontWeight: '800',
+                        color: ev.delta >= 0 ? '#059669' : '#DC2626',
+                      }}
+                    >
+                      {deltaText}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: '#475569' }}>Mức mới: {ev.newScore}</Text>
+                  </View>
+                </View>
+              );
+            })}
           </View>
         </View>
       )}

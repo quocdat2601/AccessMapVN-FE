@@ -12,19 +12,86 @@ import type {
   PublicTimelineItem,
 } from '../model/types';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const scopeIdByLocationFeature = new Map<string, string>();
+const pendingLocationLookups = new Map<string, Promise<void>>();
+
 function numberOr(value: unknown, fallback: number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+export async function resolveLocationScopeId(
+  locationId: string,
+  featureType?: AccessibilityFeatureType,
+  explicitScopeId?: string
+): Promise<string | null> {
+  if (explicitScopeId && UUID_RE.test(explicitScopeId)) {
+    return explicitScopeId;
+  }
+  const featureKey = featureType ? `${locationId}:${featureType}` : '';
+  if (featureKey && scopeIdByLocationFeature.has(featureKey)) {
+    return scopeIdByLocationFeature.get(featureKey)!;
+  }
+  const defaultKey = `${locationId}:default`;
+  if (scopeIdByLocationFeature.has(defaultKey)) {
+    return scopeIdByLocationFeature.get(defaultKey)!;
+  }
+  if (!UUID_RE.test(locationId)) {
+    return null;
+  }
+
+  let lookup = pendingLocationLookups.get(locationId);
+  if (!lookup) {
+    lookup = (async () => {
+      try {
+        const detail = await apiClient.get<{
+          scopes?: Array<{ scopeId?: string }>;
+          features?: Array<{ featureType?: string; scopeId?: string }>;
+        }>(`/api/v1/locations/${encodeURIComponent(locationId)}`, { auth: 'none' });
+        const firstScope = detail?.scopes?.[0]?.scopeId;
+        if (firstScope && UUID_RE.test(firstScope)) {
+          scopeIdByLocationFeature.set(defaultKey, firstScope);
+        }
+        if (Array.isArray(detail?.features)) {
+          for (const feat of detail.features) {
+            if (feat?.featureType && feat?.scopeId && UUID_RE.test(feat.scopeId)) {
+              scopeIdByLocationFeature.set(`${locationId}:${feat.featureType}`, feat.scopeId);
+            }
+          }
+        }
+      } catch {
+        // Skip scope caching when location detail is unavailable
+      }
+    })().finally(() => {
+      pendingLocationLookups.delete(locationId);
+    });
+    pendingLocationLookups.set(locationId, lookup);
+  }
+  await lookup;
+
+  if (featureKey && scopeIdByLocationFeature.has(featureKey)) {
+    return scopeIdByLocationFeature.get(featureKey)!;
+  }
+  return scopeIdByLocationFeature.get(defaultKey) ?? null;
+}
+
 export async function fetchCommunityState(
   locationId: string,
-  featureType: AccessibilityFeatureType
+  featureType: AccessibilityFeatureType,
+  scopeId?: string
 ): Promise<CommunityFeatureState> {
+  const effectiveScopeId = await resolveLocationScopeId(locationId, featureType, scopeId);
   const raw = await apiClient.get<any>(
     `/api/v1/locations/${encodeURIComponent(locationId)}/features/${featureType}/community`,
-    { auth: 'none' }
+    {
+      auth: 'none',
+      ...(effectiveScopeId ? { params: { scopeId: effectiveScopeId } } : {}),
+    }
   );
+  if (raw?.scopeId && UUID_RE.test(String(raw.scopeId))) {
+    scopeIdByLocationFeature.set(`${locationId}:${featureType}`, String(raw.scopeId));
+  }
   const feature = raw.feature ?? raw.locationFeature ?? raw;
   const community = raw.communityState ?? raw.state ?? raw.community ?? raw;
   const advisoryRaw = raw.activeAdvisory ?? raw.advisory ?? community.advisory ?? null;
@@ -67,9 +134,26 @@ export async function castCommunityVote(
   input: CastCommunityVoteInput,
   userId: string
 ): Promise<CommunityVoteReceipt> {
+  const extendedInput = input as CastCommunityVoteInput & {
+    scopeId?: string;
+    evidenceSubmissionId?: string;
+  };
+  const effectiveScopeId =
+    extendedInput.scopeId ?? (await resolveLocationScopeId(locationId, featureType));
+  const voteBody = {
+    ...(effectiveScopeId ? { scopeId: effectiveScopeId } : {}),
+    voteType: input.voteType,
+    observedFeatureVersion: input.observedFeatureVersion,
+    ...(input.proposedStatus ? { proposedStatus: input.proposedStatus } : {}),
+    ...(input.comment ? { comment: input.comment } : {}),
+    ...(extendedInput.evidenceSubmissionId
+      ? { evidenceSubmissionId: extendedInput.evidenceSubmissionId }
+      : {}),
+  };
+
   const raw = await apiClient.postIdempotent<any>(
     `/api/v1/locations/${encodeURIComponent(locationId)}/features/${featureType}/votes`,
-    input,
+    voteBody,
     `vote:${userId}:${locationId}:${featureType}:${input.observedFeatureVersion}:${input.voteType}:${input.proposedStatus ?? 'baseline'}`,
     { auth: 'required' }
   );

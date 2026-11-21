@@ -1,17 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import {
   AlertTriangle,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   FileWarning,
   Gavel,
+  Plus,
   RefreshCw,
   Search,
 } from "lucide-react";
 import {
+  communityModerationRepository,
   disputeStatusLabels,
   featureLabels,
   formatAdminDate,
@@ -63,6 +66,15 @@ export function ModerationQueuePage({ kind }: { kind: QueueKind }) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("All");
   const [page, setPage] = useState(1);
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideFeatureId, setOverrideFeatureId] = useState("");
+  const [overrideVersion, setOverrideVersion] = useState("1");
+  const [overrideReason, setOverrideReason] = useState("");
+  const [isCreatingOverride, setIsCreatingOverride] = useState(false);
+  const [overrideFeedback, setOverrideFeedback] = useState<{
+    tone: "success" | "error";
+    message: string;
+  } | null>(null);
   const query = useMemo<AdminQueueQuery>(
     () => ({ search, status, page, pageSize: 20 }),
     [page, search, status],
@@ -76,6 +88,46 @@ export function ModerationQueuePage({ kind }: { kind: QueueKind }) {
     : "Xử lý báo cáo chi tiết mà không biến báo cáo thành phiếu đồng thuận.";
   const statuses = isDispute ? disputeStatuses : reportStatuses;
 
+  async function handleOverrideSubmit(event: FormEvent) {
+    event.preventDefault();
+    const trimmedFeatureId = overrideFeatureId.trim();
+    const parsedVersion = Number(overrideVersion);
+    const trimmedReason = overrideReason.trim();
+    if (!trimmedFeatureId || !Number.isInteger(parsedVersion) || parsedVersion < 1 || !trimmedReason) {
+      setOverrideFeedback({
+        tone: "error",
+        message: "Vui lòng nhập đúng LocationFeatureId (UUID), phiên bản (>= 1) và lý do ghi đè.",
+      });
+      return;
+    }
+
+    setIsCreatingOverride(true);
+    setOverrideFeedback(null);
+    try {
+      await communityModerationRepository.createDisputeOverride({
+        locationFeatureId: trimmedFeatureId,
+        observedFeatureVersion: parsedVersion,
+        reason: trimmedReason,
+      });
+      setOverrideFeedback({
+        tone: "success",
+        message: "Đã mở hồ sơ ghi đè trực tiếp (Moderator Override) thành công.",
+      });
+      setOverrideFeatureId("");
+      setOverrideVersion("1");
+      setOverrideReason("");
+      setOverrideOpen(false);
+      queue.reload();
+    } catch (cause) {
+      setOverrideFeedback({
+        tone: "error",
+        message: cause instanceof Error ? cause.message : "Không thể tạo ghi đè trực tiếp.",
+      });
+    } finally {
+      setIsCreatingOverride(false);
+    }
+  }
+
   return (
     <div className="mx-auto w-full max-w-[1500px] space-y-4 p-4 sm:p-6">
       <header className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
@@ -87,10 +139,96 @@ export function ModerationQueuePage({ kind }: { kind: QueueKind }) {
           </h1>
           <p className="mt-1 text-sm text-slate-500">{description}</p>
         </div>
-        <Button variant="outline" onClick={queue.reload}>
-          <RefreshCw className="size-4" /> Làm mới
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {isDispute && (
+            <Button
+              variant={overrideOpen ? "secondary" : "default"}
+              onClick={() => {
+                setOverrideFeedback(null);
+                setOverrideOpen((prev) => !prev);
+              }}
+            >
+              <Plus className="size-4" /> Tạo ghi đè trực tiếp (Override)
+            </Button>
+          )}
+          <Button variant="outline" onClick={queue.reload}>
+            <RefreshCw className="size-4" /> Làm mới
+          </Button>
+        </div>
       </header>
+
+      {overrideFeedback && (
+        <div
+          role="status"
+          className={`flex items-center gap-2 rounded-xl border px-4 py-3 text-xs font-medium ${
+            overrideFeedback.tone === "success"
+              ? "border-teal-200 bg-teal-50 text-teal-900"
+              : "border-red-200 bg-red-50 text-red-800"
+          }`}
+        >
+          <CheckCircle2 className="size-4 shrink-0" />
+          <span>{overrideFeedback.message}</span>
+        </div>
+      )}
+
+      {isDispute && overrideOpen && (
+        <Card className="p-4 sm:p-5">
+          <h2 className="text-sm font-bold text-slate-950">Tạo tranh chấp / Ghi đè trực tiếp từ kiểm duyệt viên</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Mở hồ sơ tranh chấp chủ động cho một tiện ích đã công bố thông qua <code className="font-mono">POST /api/v1/admin/community-disputes</code>.
+          </p>
+          <form onSubmit={(event) => void handleOverrideSubmit(event)} className="mt-4 grid gap-3 md:grid-cols-3">
+            <div>
+              <label htmlFor="override-feature-id" className="block text-xs font-semibold text-slate-700">
+                LocationFeatureId (UUID) <span className="text-red-600">*</span>
+              </label>
+              <input
+                id="override-feature-id"
+                value={overrideFeatureId}
+                onChange={(event) => setOverrideFeatureId(event.target.value)}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-xs outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="override-feature-version" className="block text-xs font-semibold text-slate-700">
+                Phiên bản quan sát (ObservedFeatureVersion) <span className="text-red-600">*</span>
+              </label>
+              <input
+                id="override-feature-version"
+                type="number"
+                min={1}
+                value={overrideVersion}
+                onChange={(event) => setOverrideVersion(event.target.value)}
+                className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 font-mono text-xs outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="override-reason" className="block text-xs font-semibold text-slate-700">
+                Lý do mở tranh chấp / ghi đè <span className="text-red-600">*</span>
+              </label>
+              <input
+                id="override-reason"
+                value={overrideReason}
+                onChange={(event) => setOverrideReason(event.target.value)}
+                placeholder="Nêu rõ sai lệch hoặc yêu cầu tái thẩm định..."
+                className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
+                required
+              />
+            </div>
+            <div className="flex justify-end gap-2 md:col-span-3">
+              <Button type="button" variant="outline" size="sm" onClick={() => setOverrideOpen(false)}>
+                Hủy
+              </Button>
+              <Button type="submit" size="sm" disabled={isCreatingOverride}>
+                {isCreatingOverride ? "Đang gửi..." : "Xác nhận tạo Override"}
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
 
       <Card className="overflow-hidden">
         <div className="grid gap-3 border-b border-slate-200 bg-slate-50/60 p-4 md:grid-cols-[1fr_230px]">

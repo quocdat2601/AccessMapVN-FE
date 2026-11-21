@@ -19,7 +19,28 @@ interface AdvisoryItem {
   reason: string;
   startsAt: string;
   endsAt: string;
+  sourceReportsCount?: number;
   revocationReason?: string | null;
+}
+
+function normalizeAdvisoryItem(raw: AdvisoryItem | Record<string, unknown>): AdvisoryItem {
+  const rec = raw as Record<string, unknown>;
+  const isActive = typeof rec.isActive === "boolean" ? rec.isActive : undefined;
+  const deactivatedAt = rec.deactivatedAt ? String(rec.deactivatedAt) : "";
+  const createdAt = rec.createdAt ? String(rec.createdAt) : "";
+  return {
+    id: String(rec.id ?? ""),
+    locationFeatureId: String(rec.locationFeatureId ?? rec.placeId ?? ""),
+    locationId: rec.locationId ? String(rec.locationId) : rec.placeId ? String(rec.placeId) : null,
+    locationName: String(rec.locationName ?? rec.placeName ?? "Địa điểm"),
+    featureType: String(rec.featureType ?? ""),
+    status: String(rec.status ?? (isActive === true ? "Active" : isActive === false ? "Revoked" : "Active")),
+    reason: String(rec.reason ?? rec.advisoryText ?? ""),
+    startsAt: String(rec.startsAt ?? (createdAt || new Date().toISOString())),
+    endsAt: String(rec.endsAt ?? deactivatedAt),
+    sourceReportsCount: typeof rec.sourceReportsCount === "number" ? rec.sourceReportsCount : undefined,
+    revocationReason: rec.revocationReason ? String(rec.revocationReason) : null,
+  };
 }
 
 function statusVariant(status: string): "amber" | "teal" | "neutral" | "red" {
@@ -52,10 +73,18 @@ export default function AdvisoriesPage() {
     let cancelled = false;
     async function fetchAdvisories() {
       try {
-        const query = statusFilter === "ALL" ? "" : `?status=${encodeURIComponent(statusFilter)}`;
-        const res = await apiRequest<AdvisoryItem[]>(`/api/v1/admin/advisories${query}`);
+        const query =
+          statusFilter === "ALL"
+            ? ""
+            : statusFilter === "Active"
+              ? "?onlyActive=true&status=Active"
+              : `?status=${encodeURIComponent(statusFilter)}`;
+        const res = await apiRequest<Array<AdvisoryItem | Record<string, unknown>>>(
+          `/api/v1/admin/advisories${query}`,
+        );
         if (!cancelled) {
-          setItems(res.data);
+          const list = Array.isArray(res.data) ? res.data.map(normalizeAdvisoryItem) : [];
+          setItems(list);
           setError(null);
         }
       } catch (cause) {
@@ -79,11 +108,15 @@ export default function AdvisoriesPage() {
     setBusyId(id);
     setError(null);
     try {
-      const res = await apiRequest<AdvisoryItem>(`/api/v1/admin/advisories/${id}/deactivate`, {
-        method: "POST",
-        body: { reason: "Quản trị viên đã xác nhận sự cố tiếp cận được khắc phục." },
-      });
-      setItems((prev) => prev.map((item) => (item.id === id ? res.data : item)));
+      const res = await apiRequest<AdvisoryItem | Record<string, unknown>>(
+        `/api/v1/admin/advisories/${id}/deactivate`,
+        {
+          method: "POST",
+          body: { note: "Quản trị viên đã xác nhận sự cố tiếp cận được khắc phục." },
+        },
+      );
+      const normalized = normalizeAdvisoryItem(res.data);
+      setItems((prev) => prev.map((item) => (item.id === id ? normalized : item)));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Không thể đóng cảnh báo.");
     } finally {
@@ -106,6 +139,7 @@ export default function AdvisoriesPage() {
         </div>
         <div className="flex items-center gap-2">
           <select
+            aria-label="Lọc trạng thái cảnh báo"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-teal-500"
@@ -156,7 +190,9 @@ export default function AdvisoriesPage() {
                     </div>
                     <p className="text-sm text-slate-700">{item.reason}</p>
                     <p className="text-xs text-slate-400">
-                      Hiệu lực: {new Date(item.startsAt).toLocaleDateString("vi-VN")} → {new Date(item.endsAt).toLocaleDateString("vi-VN")}
+                      Tạo lúc: {new Date(item.startsAt).toLocaleDateString("vi-VN")}
+                      {item.endsAt ? ` → ${new Date(item.endsAt).toLocaleDateString("vi-VN")}` : " · Đang áp dụng"}
+                      {typeof item.sourceReportsCount === "number" ? ` · ${item.sourceReportsCount} báo cáo liên quan` : ""}
                       {item.revocationReason ? ` · Ghi chú đóng: ${item.revocationReason}` : ""}
                     </p>
                   </div>

@@ -1,16 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  Activity,
   Settings2,
   Save,
   RotateCcw,
+  RefreshCw,
   CheckCircle2,
   MapPin,
   Clock,
   Sparkles,
   Info,
+  ShieldCheck,
 } from "lucide-react";
+import { apiRequest, getStoredPortalAuth } from "@/shared/api/api-client";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/ui/card";
@@ -56,6 +60,49 @@ export default function SystemSettingsPage() {
     return DEFAULT_SETTINGS;
   });
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [healthState, setHealthState] = useState<{
+    backend: "checking" | "online" | "offline";
+    ai: "checking" | "online" | "offline";
+    portalAuthActive: boolean;
+    checkedAt: string | null;
+  }>({
+    backend: "checking",
+    ai: "checking",
+    portalAuthActive: false,
+    checkedAt: null,
+  });
+  const [healthReload, setHealthReload] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function checkServices() {
+      const aiBaseUrl = (process.env.NEXT_PUBLIC_AI_SERVICE_URL ?? "http://localhost:8000").replace(/\/$/, "");
+      const portalActive = Boolean(getStoredPortalAuth()?.accessToken);
+
+      const [backendResult, aiResult] = await Promise.all([
+        apiRequest("/api/v1/admin/dashboard?range=7d")
+          .then(() => "online" as const)
+          .catch(() => "offline" as const),
+        fetch(`${aiBaseUrl}/health`)
+          .then((res) => (res.ok ? ("online" as const) : ("offline" as const)))
+          .catch(() => "offline" as const),
+      ]);
+
+      if (!cancelled) {
+        setHealthState({
+          backend: backendResult,
+          ai: aiResult,
+          portalAuthActive: portalActive,
+          checkedAt: new Date().toLocaleTimeString("vi-VN"),
+        });
+      }
+    }
+
+    void checkServices();
+    return () => {
+      cancelled = true;
+    };
+  }, [healthReload]);
 
   const handleSave = () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
@@ -109,6 +156,70 @@ export default function SystemSettingsPage() {
           </div>
         </div>
       )}
+
+      {/* Service Health & Active Policy Banner */}
+      <Card className="shadow-sm border-slate-200">
+        <CardHeader className="flex flex-row items-center justify-between gap-4 pb-3">
+          <div>
+            <div className="flex items-center gap-2 text-teal-700 font-semibold text-sm">
+              <Activity className="size-4" /> Trạng thái kết nối dịch vụ &amp; Chính sách đang áp dụng
+            </div>
+            <CardDescription>
+              Kiểm tra trực tiếp .NET Backend API, FastAPI AI Verification Service và phiên đăng nhập Portal Auth.
+              {healthState.checkedAt ? ` Cập nhật lúc ${healthState.checkedAt}.` : ""}
+            </CardDescription>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setHealthState((prev) => ({ ...prev, backend: "checking", ai: "checking" }));
+              setHealthReload((v) => v + 1);
+            }}
+          >
+            <RefreshCw className="size-3.5" /> Kiểm tra lại
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-600">.NET Backend API</span>
+                <Badge variant={healthState.backend === "online" ? "teal" : healthState.backend === "checking" ? "neutral" : "red"}>
+                  {healthState.backend === "online" ? "Hoạt động" : healthState.backend === "checking" ? "Đang kiểm tra" : "Mất kết nối"}
+                </Badge>
+              </div>
+              <p className="mt-1 font-mono text-[11px] text-slate-500">/api/v1/admin/dashboard</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-600">FastAPI AI Service</span>
+                <Badge variant={healthState.ai === "online" ? "teal" : healthState.ai === "checking" ? "neutral" : "amber"}>
+                  {healthState.ai === "online" ? "Hoạt động" : healthState.ai === "checking" ? "Đang kiểm tra" : "Không phản hồi"}
+                </Badge>
+              </div>
+              <p className="mt-1 font-mono text-[11px] text-slate-500">/health (AI CV Pre-Scan &amp; Verify)</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-600">Phiên Portal Auth</span>
+                <Badge variant={healthState.portalAuthActive ? "teal" : "neutral"}>
+                  {healthState.portalAuthActive ? "Đã xác thực Portal" : "Supabase / Chưa gắn"}
+                </Badge>
+              </div>
+              <p className="mt-1 font-mono text-[11px] text-slate-500">CSRF &amp; Policy Token Guard</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-teal-100 bg-teal-50/50 px-3 py-2.5 text-xs text-slate-700">
+            <ShieldCheck className="size-4 text-teal-700 shrink-0" />
+            <span className="font-semibold text-teal-900">Phiên bản chính sách chuẩn:</span>
+            <Badge variant="neutral" className="font-mono">qcvn10-2024-accessmap-v1</Badge>
+            <Badge variant="blue" className="font-mono">WF-04: v3-metrics-3</Badge>
+            <Badge variant="teal">WF-02 Diversity Cap: 60%/user</Badge>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Grid Content */}
       <div className="grid gap-6 md:grid-cols-2">

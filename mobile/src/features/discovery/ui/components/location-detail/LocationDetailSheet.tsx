@@ -354,6 +354,11 @@ export function LocationDetailSheet({
     });
   }, [place, isFullyVerified, liveFeatureStates]);
 
+  const activeAdvisories = useMemo(
+    () => features.filter((feature) => Boolean(feature.advisory?.reason)),
+    [features]
+  );
+
   const hasPublishedAccessibilityInfo =
     !isUnrated && features.some((feature) => feature.publishedStatus !== 'Unknown');
   const hasDemoCommunityContent = isDemo1 || isDemo2;
@@ -838,6 +843,49 @@ export function LocationDetailSheet({
               onToggleFavorite={onToggleFavorite ? () => onToggleFavorite(place) : undefined}
               onClose={dismissSheet}
             />
+
+            {activeAdvisories.length > 0 ? (
+              <View
+                accessibilityRole="summary"
+                accessibilityLabel="Cảnh báo tạm thời tại địa điểm"
+                style={{
+                  marginHorizontal: 20,
+                  marginTop: 10,
+                  marginBottom: 4,
+                  borderRadius: 14,
+                  borderWidth: 1,
+                  borderColor: '#FDE68A',
+                  backgroundColor: '#FFFBEB',
+                  padding: 12,
+                  gap: 6,
+                }}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <MaterialCommunityIcons name="alert-circle-outline" size={17} color="#B45309" />
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: '#92400E' }}>
+                    Cảnh báo tạm thời tại địa điểm
+                  </Text>
+                </View>
+                {activeAdvisories.map((item) => {
+                  const endDate = item.advisory?.endsAt ? new Date(item.advisory.endsAt) : null;
+                  const endLabel =
+                    endDate && !Number.isNaN(endDate.getTime())
+                      ? `Hiệu lực đến ${endDate.toLocaleDateString('vi-VN')}`
+                      : null;
+                  return (
+                    <View key={`adv-${item.featureType}`} style={{ gap: 2 }}>
+                      <Text style={{ fontSize: 12.5, fontWeight: '700', color: '#78350F' }}>
+                        {item.label}:{' '}
+                        <Text style={{ fontWeight: '500' }}>{item.advisory?.reason}</Text>
+                      </Text>
+                      {endLabel ? (
+                        <Text style={{ fontSize: 11, color: '#B45309' }}>{endLabel}</Text>
+                      ) : null}
+                    </View>
+                  );
+                })}
+              </View>
+            ) : null}
 
             <AccessibilitySummary
               isUnrated={isUnrated}

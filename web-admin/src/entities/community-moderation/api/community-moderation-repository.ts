@@ -155,6 +155,32 @@ export const communityModerationRepository = {
     );
   },
 
+  createDisputeOverride(
+    input: {
+      locationFeatureId: string;
+      observedFeatureVersion: number;
+      reason: string;
+      evidenceSubmissionId?: string;
+      reportId?: string;
+    },
+    idempotencyKey = crypto.randomUUID(),
+  ) {
+    const body = {
+      locationFeatureId: input.locationFeatureId.trim(),
+      observedFeatureVersion: input.observedFeatureVersion,
+      reason: input.reason.trim(),
+      ...(input.evidenceSubmissionId?.trim()
+        ? { evidenceSubmissionId: input.evidenceSubmissionId.trim() }
+        : {}),
+      ...(input.reportId?.trim() ? { reportId: input.reportId.trim() } : {}),
+    };
+    return apiRequest<DisputeDetail>(`/api/v1/admin/community-disputes`, {
+      method: "POST",
+      body,
+      idempotencyKey,
+    });
+  },
+
   async getReports(query: AdminQueueQuery = {}, signal?: AbortSignal) {
     const response = await apiRequest<AdminQueueResponse<ReportQueueItem> | ReportQueueItem[]>(
       `/api/v1/admin/reports${queryString(query)}`,

@@ -29,9 +29,15 @@ export interface DuplicateLocationChallenge {
 }
 
 export interface IdentityConfirmationInput {
-  decision: 'UseExisting' | 'ConfirmDistinct';
+  decision: 'UseExisting' | 'ConfirmDistinct' | 'DistinctPlace';
   confirmationToken: string;
   reason: string;
+}
+
+export interface SubmissionUserMeasurements {
+  doorClearWidthCm?: number | null;
+  rampHeightCm?: number | null;
+  rampLengthCm?: number | null;
 }
 
 export interface UploadCaptureContext {
@@ -356,6 +362,7 @@ export async function submitContributionToBackend(
     uploadedUrl: string;
     locationName?: string;
     proposedScope?: ProposedUploadScope;
+    userMeasurements?: SubmissionUserMeasurements | null;
     identityConfirmation?: IdentityConfirmationInput;
   }
 ): Promise<{
@@ -370,20 +377,62 @@ export async function submitContributionToBackend(
   const operationId = `submission-create:${legacyPayload.client_submission_id}`;
 
   if (meta?.mediaId) {
+    type CriterionObsPayload = {
+      criterionCode: string;
+      values: Record<string, number | boolean | string>;
+      measurementMethod: string;
+      evidenceRefs: Array<{ mediaId: string }>;
+    };
     const claims: Array<{
       featureType: string;
       claimedStatus: string;
       description?: string;
+      criterionObservations?: CriterionObsPayload[];
     }> = [];
     const seenTypes = new Set<string>();
+    const measurements = options.userMeasurements;
     for (const tag of legacyPayload.feature_tags || []) {
       const mapped = FEATURE_TAG_TO_BACKEND_TYPE[tag];
       if (!mapped || seenTypes.has(mapped)) continue;
       seenTypes.add(mapped);
+
+      const criterionObservations: CriterionObsPayload[] = [];
+      if (
+        mapped === 'Ramp' &&
+        measurements?.rampHeightCm != null &&
+        measurements.rampHeightCm >= 0 &&
+        measurements?.rampLengthCm != null &&
+        measurements.rampLengthCm > 0
+      ) {
+        criterionObservations.push({
+          criterionCode: 'RAMP_SLOPE',
+          values: {
+            riseMm: Math.round(measurements.rampHeightCm * 10),
+            runMm: Math.round(measurements.rampLengthCm * 10),
+          },
+          measurementMethod: 'DirectMeasurement',
+          evidenceRefs: [{ mediaId: meta.mediaId }],
+        });
+      } else if (
+        mapped === 'EntranceDoor' &&
+        measurements?.doorClearWidthCm != null &&
+        measurements.doorClearWidthCm >= 0
+      ) {
+        criterionObservations.push({
+          criterionCode: 'ENTRANCE_CLEAR_WIDTH',
+          values: {
+            clearWidthMm: Math.round(measurements.doorClearWidthCm * 10),
+          },
+          measurementMethod: 'DirectMeasurement',
+          evidenceRefs: [{ mediaId: meta.mediaId }],
+        });
+      }
+
       claims.push({
         featureType: mapped,
         claimedStatus: 'Available',
         description: legacyPayload.text_description || undefined,
+        ...(criterionObservations.length > 0 ? { criterionObservations } : {}),
       });
     }
     if (claims.length === 0) {
@@ -395,6 +444,20 @@ export async function submitContributionToBackend(
     }
 
     const hasUuidLocation = UUID_RE.test(legacyPayload.location_id);
+    const resolvedConfirmation =
+      !hasUuidLocation &&
+      options.identityConfirmation &&
+      options.identityConfirmation.decision !== 'UseExisting'
+        ? {
+            decision:
+              options.identityConfirmation.decision === 'ConfirmDistinct'
+                ? 'DistinctPlace'
+                : options.identityConfirmation.decision,
+            confirmationToken: options.identityConfirmation.confirmationToken,
+            reason: options.identityConfirmation.reason,
+          }
+        : undefined;
+
     const contractBBody = {
       mediaIds: [meta.mediaId],
       accessibilityClaims: claims,
@@ -404,16 +467,14 @@ export async function submitContributionToBackend(
             placeName: options.locationName || 'Địa điểm khảo sát',
             latitude: legacyPayload.gps_lat,
             longitude: legacyPayload.gps_lng,
-            positionSource: 'ContributorProposal',
+            positionSource: 'ManualPin',
           }),
       proposedScope: options.proposedScope ?? { kind: 'BuildingGeneral', label: 'Whole place' },
       textDescription: legacyPayload.text_description || undefined,
       ...(meta.suggestionCorrelationId
         ? { suggestionCorrelationId: meta.suggestionCorrelationId }
         : {}),
-      ...(options.identityConfirmation
-        ? { identityConfirmation: options.identityConfirmation }
-        : {}),
+      ...(resolvedConfirmation ? { identityConfirmation: resolvedConfirmation } : {}),
     };
 
     try {

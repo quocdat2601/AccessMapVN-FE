@@ -259,6 +259,7 @@ export function FinalScorecardScreen({
         uploadedUrl,
         locationName: media.locationName,
         proposedScope,
+        userMeasurements,
         identityConfirmation: override?.identityConfirmation,
       });
 
@@ -907,19 +908,11 @@ export function FinalScorecardScreen({
                 <Pressable
                   key={cand.locationId}
                   onPress={() => {
-                    const challenge = duplicateChallenge;
                     setDuplicateChallenge(null);
                     setResolvedLocationIdOverride(cand.locationId);
-                    if (challenge) {
-                      void submitContribution({
-                        locationId: cand.locationId,
-                        identityConfirmation: {
-                          decision: 'UseExisting',
-                          confirmationToken: challenge.confirmationToken,
-                          reason: 'Chọn địa điểm sẵn có từ danh sách gợi ý trùng lặp.',
-                        },
-                      });
-                    }
+                    void submitContribution({
+                      locationId: cand.locationId,
+                    });
                   }}
                   style={{
                     minHeight: 48,
@@ -981,7 +974,7 @@ export function FinalScorecardScreen({
                   if (challenge) {
                     void submitContribution({
                       identityConfirmation: {
-                        decision: 'ConfirmDistinct',
+                        decision: 'DistinctPlace',
                         confirmationToken: challenge.confirmationToken,
                         reason: trimmed,
                       },
