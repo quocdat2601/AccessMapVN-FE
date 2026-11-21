@@ -1,0 +1,16 @@
+{
+  "name": "accessmapvn-fe",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AccessMap VN Frontend Monorepo (Web Admin & Mobile)",
+  "scripts": {
+    "web": "npm --prefix web-admin run dev",
+    "mobile": "npm --prefix mobile start",
+    "mobile:web": "npm --prefix mobile run web",
+    "check:web": "npm --prefix web-admin run typecheck",
+    "check:mobile": "npm --prefix mobile run typecheck",
+    "check": "npm run check:web && npm run check:mobile",
+    "build:web": "npm --prefix web-admin run build",
+    "test:mobile": "npm --prefix mobile test"
+  }
+}
