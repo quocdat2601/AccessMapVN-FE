@@ -1,4 +1,4 @@
-export type VerificationStatus = 'AutoVerified' | 'PendingModeration' | 'AwaitingMoreInfo';
+export type VerificationStatus = 'PendingModeration' | 'AwaitingMoreInfo';
 
 export interface PersonaFitEvaluation {
   electricWheelchair: 'FullyAccessible' | 'Accessible' | 'Inaccessible';
@@ -30,6 +30,7 @@ export interface VerificationMatrixInput {
   selectedTags: string[];
   verifiedTagCount?: number;
   unverifiedTagCount?: number;
+  allowedRadiusMeters?: number;
   venueCategory?: string;
   isLargeVenue?: boolean;
 }
@@ -122,8 +123,9 @@ export function evaluateVerificationMatrix(
   // 1. Computer Vision Pillar (Weight 50%)
   const cvRawScore = Math.min(100, Math.max(0, Math.round(input.cvConfidence * 100)));
 
-  // 2. NLP Context Pillar (Weight 20%)
+  // 2. NLP Context Pillar (Optional — weight 20% only when notes are provided; 0 penalty when empty)
   const notes = (input.textDescription || '').trim().toLowerCase();
+  const hasNotes = notes.length > 0;
   const matchedKeywords: string[] = [];
 
   for (const kw of ACCESSIBILITY_KEYWORDS) {
@@ -132,18 +134,18 @@ export function evaluateVerificationMatrix(
     }
   }
 
-  let nlpScore = 50; // baseline neutral if notes empty
-  if (notes.length > 0) {
+  let nlpScore = 0;
+  if (hasNotes) {
     if (matchedKeywords.length >= 2) {
       nlpScore = 95;
     } else if (matchedKeywords.length === 1) {
       nlpScore = 85;
     } else {
-      nlpScore = 65; // User provided notes but irrelevant to accessibility
+      nlpScore = 70; // Optional note provided without standard keywords
     }
   }
 
-  // 3. Spatial Proximity Geofence Pillar (Weight 30%)
+  // 3. Spatial Proximity Geofence Pillar
   let distanceMeters: number | null = null;
   let spatialValid = true;
   let spatialScore = 80; // neutral default if GPS missing
@@ -154,6 +156,7 @@ export function evaluateVerificationMatrix(
     const accuracyMargin = input.contributorCoords.accuracy
       ? Math.min(30, Math.max(0, Math.round(input.contributorCoords.accuracy)))
       : 0;
+    const allowedRadius = input.allowedRadiusMeters && input.allowedRadiusMeters > 0 ? input.allowedRadiusMeters : 50;
 
     // Large venues (malls, supermarkets, hospitals, parks, transit stations) suffer from indoor drift
     const isLargeVenue =
@@ -164,19 +167,24 @@ export function evaluateVerificationMatrix(
     const buildingAllowance = isLargeVenue ? 35 : 0;
 
     const effectiveDistance = Math.max(0, distanceMeters - accuracyMargin - buildingAllowance);
-    spatialValid = effectiveDistance <= 50;
+    spatialValid = effectiveDistance <= allowedRadius;
 
     if (spatialValid) {
-      // 0m = 100%, 50m = 80%
-      spatialScore = Math.max(80, Math.round(100 - (effectiveDistance / 50) * 20));
+      // 0m = 100%, allowedRadius = 80%
+      spatialScore = Math.max(80, Math.round(100 - (effectiveDistance / allowedRadius) * 20));
     } else {
-      // Penalty when exceeding 50m geofence
-      spatialScore = Math.max(10, Math.round(60 - Math.min(50, effectiveDistance - 50)));
+      // Penalty when exceeding allowedRadius geofence
+      spatialScore = Math.max(10, Math.round(60 - Math.min(50, effectiveDistance - allowedRadius)));
     }
   }
 
-  // Baseline Combined weighted score (CV: 50%, NLP: 20%, Spatial: 30%)
-  let overallScore = Math.round(cvRawScore * 0.5 + nlpScore * 0.2 + spatialScore * 0.3);
+  const cvWeight = hasNotes ? 0.5 : 0.65;
+  const spatialWeight = hasNotes ? 0.3 : 0.35;
+  const nlpWeight = hasNotes ? 0.2 : 0;
+
+  let overallScore = Math.round(
+    cvRawScore * cvWeight + spatialScore * spatialWeight + nlpScore * nlpWeight
+  );
 
   // BR-13 Penalty: If spatial distance exceeds 50m, enforce maximum threshold of 75%
   if (!spatialValid) {
@@ -296,11 +304,11 @@ export function evaluateVerificationMatrix(
   const verifiedTagCount = input.verifiedTagCount ?? (cvRawScore > 0 ? input.selectedTags.length : 0);
   const unverifiedTagCount = input.unverifiedTagCount ?? (cvRawScore === 0 ? input.selectedTags.length : 0);
 
-  // Categorize overall status according to BR-09 & BR-10
+  // Categorize overall status per WF-01 spec (valid submissions always route to Admin review)
   let status: VerificationStatus = 'PendingModeration';
   let statusLabel = 'Chờ duyệt viên';
   let statusDescription =
-    'Thông tin ở mức tốt. Đóng góp sẽ được kiểm duyệt viên xác nhận sớm.';
+    'Thông tin ở mức khá. Đóng góp sẽ được kiểm duyệt viên xem xét và đối chiếu.';
 
   if (hasNoFeatures || hasDiscrepancy || overallScore < 60) {
     status = 'AwaitingMoreInfo';
@@ -314,12 +322,12 @@ export function evaluateVerificationMatrix(
     status = 'PendingModeration';
     statusLabel = 'Chờ duyệt viên';
     statusDescription =
-      `Đã xác thực ${verifiedTagCount}/${input.selectedTags.length} đặc điểm qua ảnh. ${unverifiedTagCount} đặc điểm tự khai báo thêm cần kiểm duyệt viên xác minh.`;
+      `Đã xác thực ${verifiedTagCount}/${input.selectedTags.length} đặc điểm qua hình ảnh. ${unverifiedTagCount} đặc điểm tự khai báo thêm cần kiểm duyệt viên xác minh.`;
   } else if (overallScore >= 80 && spatialValid) {
-    status = 'AutoVerified';
-    statusLabel = 'Tự động duyệt';
+    status = 'PendingModeration';
+    statusLabel = 'Đủ điều kiện gửi duyệt';
     statusDescription =
-      'Độ tin cậy cao, hình ảnh và vị trí chuẩn xác. Đủ điều kiện xuất bản lên bản đồ.';
+      'Minh chứng rõ nét và đúng vị trí thực địa. Hồ sơ sẵn sàng gửi để kiểm duyệt viên xét duyệt.';
   }
 
   return {
@@ -332,18 +340,20 @@ export function evaluateVerificationMatrix(
     pillars: {
       computerVision: {
         score: cvRawScore,
-        weight: 0.5,
+        weight: cvWeight,
         label: `${cvRawScore}% độ khớp thị giác máy tính`,
       },
       nlpContext: {
         score: nlpScore,
-        weight: 0.2,
-        label: `${nlpScore}% ngữ cảnh mô tả (${matchedKeywords.length} từ khóa khớp)`,
+        weight: nlpWeight,
+        label: hasNotes
+          ? `${nlpScore}% ngữ cảnh mô tả (${matchedKeywords.length} từ khóa khớp)`
+          : 'Không nhập ghi chú (không trừ điểm)',
         matchedKeywords,
       },
       spatialProximity: {
         score: spatialScore,
-        weight: 0.3,
+        weight: spatialWeight,
         distanceMeters,
         isWithin50m: spatialValid,
       },

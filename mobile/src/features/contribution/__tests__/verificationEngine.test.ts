@@ -9,7 +9,7 @@ import {
 export function runVerificationEngineTests() {
   console.log('🧪 [TEST SUITE 1] verificationEngine.test.ts');
 
-  // Test Case 1: Điểm tổng hợp >= 80% -> Trả về trạng thái AutoVerified
+  // Test Case 1: Điểm tổng hợp >= 80% + vị trí hợp lệ -> PendingModeration (Đủ điều kiện gửi duyệt)
   {
     const input: VerificationMatrixInput = {
       cvConfidence: 0.92, // 92% CV
@@ -20,15 +20,34 @@ export function runVerificationEngineTests() {
     };
 
     const result = evaluateVerificationMatrix(input);
-    assert.ok(result.overallScore >= 80, `Expected score >= 80, got ${result.overallScore}`);
-    assert.strictEqual(result.status, 'AutoVerified');
+    assert.ok(result.overallScore >= 90, `Expected score >= 90, got ${result.overallScore}`);
+    assert.strictEqual(result.status, 'PendingModeration');
+    assert.strictEqual(result.statusLabel, 'Đủ điều kiện gửi duyệt');
     assert.strictEqual(result.spatialValid, true);
     assert.strictEqual(result.spatialDistanceMeters, 0);
     assert.strictEqual(result.recommendedExp, 50);
-    console.log('  ✅ Test Case 1: Overall Score >= 80% -> AutoVerified (PASSED)');
+    console.log('  ✅ Test Case 1: Overall Score >= 80% -> PendingModeration (Eligible for review) (PASSED)');
   }
 
-  // Test Case 2: Điểm tổng hợp trong khoảng 60% - 79% -> Trả về PendingModeration
+  // Test Case 1B: Bỏ trống ghi chú tùy chọn không bị trừ điểm
+  {
+    const input: VerificationMatrixInput = {
+      cvConfidence: 0.92,
+      textDescription: '',
+      contributorCoords: { latitude: 10.7736, longitude: 106.7011 },
+      poiCoords: { latitude: 10.7736, longitude: 106.7011 },
+      selectedTags: ['door_width_ok'],
+    };
+
+    const result = evaluateVerificationMatrix(input);
+    assert.ok(result.overallScore >= 90, `Expected >= 90 without note penalty, got ${result.overallScore}`);
+    assert.strictEqual(result.status, 'PendingModeration');
+    assert.strictEqual(result.statusLabel, 'Đủ điều kiện gửi duyệt');
+    assert.strictEqual(result.pillars.nlpContext.weight, 0);
+    console.log('  ✅ Test Case 1B: Empty optional note does not penalize score (PASSED)');
+  }
+
+  // Test Case 2: Điểm tổng hợp trong khoảng 60% - 89% -> Trả về PendingModeration
   {
     const input: VerificationMatrixInput = {
       cvConfidence: 0.68, // 68% CV vừa phải
@@ -40,12 +59,12 @@ export function runVerificationEngineTests() {
 
     const result = evaluateVerificationMatrix(input);
     assert.ok(
-      result.overallScore >= 60 && result.overallScore < 80,
-      `Expected 60 <= score < 80, got ${result.overallScore}`
+      result.overallScore >= 60 && result.overallScore < 90,
+      `Expected 60 <= score < 90, got ${result.overallScore}`
     );
     assert.strictEqual(result.status, 'PendingModeration');
     assert.strictEqual(result.spatialValid, true);
-    console.log('  ✅ Test Case 2: 60% <= Overall Score < 80% -> PendingModeration (PASSED)');
+    console.log('  ✅ Test Case 2: 60% <= Overall Score < 90% -> PendingModeration (PASSED)');
   }
 
   // Test Case 3: Điểm tổng hợp < 60% -> Trả về AwaitingMoreInfo
@@ -84,8 +103,10 @@ export function runVerificationEngineTests() {
     const result = evaluateVerificationMatrix(input);
     assert.strictEqual(result.spatialValid, false);
     assert.ok(result.spatialDistanceMeters! > 50);
-    // Khi vi phạm ranh giới GPS > 50m, theo BR-13 không được AutoVerified
-    assert.notStrictEqual(result.status, 'AutoVerified');
+    // Khi vi phạm ranh giới GPS > 50m, theo BR-13 điểm bị giới hạn <= 75% và không đạt Đủ điều kiện gửi duyệt
+    assert.ok(result.overallScore <= 75);
+    assert.strictEqual(result.status, 'PendingModeration');
+    assert.notStrictEqual(result.statusLabel, 'Đủ điều kiện gửi duyệt');
     console.log(`  ✅ Test Case 4: Distance ${distance}m > 50m -> spatialValid = false (PASSED)`);
   }
 
@@ -274,9 +295,9 @@ export async function runAiLiveImageTests() {
     const data = await res.json();
 
     // Regression Check 1: Must NOT mention elevator or "không có thang máy"
-    assert.strictEqual(
-      data.summary,
-      'Chưa phát hiện tiện ích tiếp cận nào trong ảnh.',
+    assert.ok(
+      data.summary.includes('tiện ích tiếp cận') &&
+        (data.summary.includes('Không phát hiện') || data.summary.includes('Chưa phát hiện')),
       `Summary should be neutral, got: ${data.summary}`
     );
     assert.ok(
@@ -286,7 +307,7 @@ export async function runAiLiveImageTests() {
 
     // Regression Check 2: No accessibility features detected
     const rawFeatures = data.features || {};
-    const hasAnyDetected = Object.values(rawFeatures).some((f: any) => f?.value === true);
+    const hasAnyDetected = Object.values(rawFeatures).some((f: any) => f?.value === true || f?.value === 'present');
     assert.strictEqual(hasAnyDetected, false, 'Expected 0 features detected in random room');
 
     // Regression Check 3: Feed 0 confirmed tags into verification engine -> score <= 25%, AwaitingMoreInfo
@@ -339,12 +360,12 @@ export async function runAiLiveImageTests() {
       selectedTags: ['exterior_ramp_present', 'ramp_slope_comfortable', 'door_width_ok'],
     };
     const matrixResult = evaluateVerificationMatrix(evalInput);
-    assert.ok(matrixResult.overallScore >= 80, `Expected score >= 80, got ${matrixResult.overallScore}`);
-    assert.strictEqual(matrixResult.status, 'AutoVerified');
-    assert.strictEqual(matrixResult.statusLabel, 'Tự động duyệt');
+    assert.ok(matrixResult.overallScore >= 90, `Expected score >= 90, got ${matrixResult.overallScore}`);
+    assert.strictEqual(matrixResult.status, 'PendingModeration');
+    assert.strictEqual(matrixResult.statusLabel, 'Đủ điều kiện gửi duyệt');
     assert.strictEqual(matrixResult.personaFit.electricWheelchair, 'FullyAccessible');
 
-    console.log('  ✅ Live AI Test B: Real ramp photo -> Score >= 80% AutoVerified & FullyAccessible (PASSED)');
+    console.log('  ✅ Live AI Test B: Real ramp photo -> Score >= 90% Eligible & FullyAccessible (PASSED)');
   }
 
   // Test C: User Captured Ramp Photo (user_ramp_pick.png without text hints) -> AI detects ramp!
@@ -363,9 +384,8 @@ export async function runAiLiveImageTests() {
 
     assert.strictEqual(res.status, 200);
     const data = await res.json();
-    assert.strictEqual(
-      data.features.exterior_ramp_present.value,
-      true,
+    assert.ok(
+      data.features.exterior_ramp_present.value === 'present' || data.features.exterior_ramp_present.value === true,
       'AI should detect ramp in user ramp picture'
     );
     assert.ok(

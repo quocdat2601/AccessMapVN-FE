@@ -20,6 +20,9 @@ function getNativeImagePicker(): typeof import('expo-image-picker') | null {
 interface TestGalleryPickerButtonProps {
   locationId: string;
   locationName: string;
+  targetCoordinates?: { latitude: number; longitude: number } | null;
+  mode?: 'photo' | 'video';
+  disabled?: boolean;
   onMediaPicked: (media: CapturedContributionMedia) => void;
 }
 
@@ -31,6 +34,9 @@ interface TestGalleryPickerButtonProps {
 export function TestGalleryPickerButton({
   locationId,
   locationName,
+  targetCoordinates,
+  mode = 'photo',
+  disabled = false,
   onMediaPicked,
 }: TestGalleryPickerButtonProps) {
   const [picking, setPicking] = useState(false);
@@ -41,7 +47,7 @@ export function TestGalleryPickerButton({
   }
 
   const handlePickImage = async () => {
-    if (picking) return;
+    if (picking || disabled) return;
     setPicking(true);
     try {
       const ImagePicker = getNativeImagePicker();
@@ -63,10 +69,10 @@ export function TestGalleryPickerButton({
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: [mode === 'video' ? 'videos' : 'images'],
         allowsEditing: false,
-        quality: 0.8,
-        base64: true,
+        quality: 0.7,
+        base64: mode !== 'video',
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -76,12 +82,15 @@ export function TestGalleryPickerButton({
             uri: asset.uri,
             width: asset.width,
             height: asset.height,
-            fileName: asset.fileName ?? 'gallery-test.jpg',
+            fileName: asset.fileName ?? (mode === 'video' ? 'gallery-test.mp4' : 'gallery-test.jpg'),
             fileSize: asset.fileSize,
             base64: asset.base64 ?? undefined,
+            type: mode,
+            durationSeconds: mode === 'video' ? (asset.duration ? Math.round(asset.duration / 1000) : 6) : undefined,
           },
           locationId,
-          locationName
+          locationName,
+          targetCoordinates
         );
         onMediaPicked(adaptedMedia);
       }
@@ -92,21 +101,28 @@ export function TestGalleryPickerButton({
     }
   };
 
+  const isButtonDisabled = disabled || picking;
+
   return (
     <Pressable
-      style={({ pressed }) => [styles.button, pressed && styles.pressed]}
+      style={({ pressed }) => [
+        styles.button,
+        pressed && styles.pressed,
+        isButtonDisabled && styles.disabled,
+      ]}
       onPress={handlePickImage}
-      disabled={picking}
+      disabled={isButtonDisabled}
       accessibilityRole="button"
-      accessibilityLabel="[TEST] Chọn ảnh từ máy"
+      accessibilityLabel="Chọn ảnh từ thư viện (Test)"
+      hitSlop={12}
     >
       {picking ? (
-        <ActivityIndicator size="small" color="#facc15" />
+        <ActivityIndicator size="small" color="#ffffff" />
       ) : (
-        <MaterialCommunityIcons name="image-plus" size={18} color="#facc15" />
+        <MaterialCommunityIcons name="image-multiple-outline" size={22} color="#ffffff" />
       )}
-      <View style={styles.textContainer}>
-        <Text style={styles.badgeText}>[TEST] PICK ẢNH</Text>
+      <View style={styles.testBadge} pointerEvents="none">
+        <Text style={styles.testBadgeText}>TEST</Text>
       </View>
     </Pressable>
   );
@@ -114,32 +130,37 @@ export function TestGalleryPickerButton({
 
 const styles = StyleSheet.create({
   button: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(15, 23, 42, 0.85)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
     borderWidth: 1.5,
-    borderColor: '#facc15',
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    gap: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  pressed: {
-    opacity: 0.75,
-    transform: [{ scale: 0.97 }],
-  },
-  textContainer: {
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  badgeText: {
-    color: '#facc15',
-    fontSize: 11,
+  pressed: {
+    opacity: 0.7,
+    transform: [{ scale: 0.95 }],
+  },
+  disabled: {
+    opacity: 0.4,
+  },
+  testBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#facc15',
+    borderRadius: 5,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  testBadgeText: {
+    color: '#0f172a',
+    fontSize: 8.5,
     fontWeight: '800',
-    letterSpacing: 0.6,
+    letterSpacing: 0.4,
   },
 });

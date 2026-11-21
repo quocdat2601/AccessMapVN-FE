@@ -17,11 +17,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraHeader } from '../components/camera/CameraHeader';
 import { CameraStatusOverlay } from '../components/camera/CameraStatusOverlay';
 import { CaptureControls } from '../components/camera/CaptureControls';
-import { MediaPreview } from '../components/camera/MediaPreview';
 import { PermissionState } from '../components/camera/PermissionState';
 import {
-  addContributionRecord,
-  setPendingContributionMedia,
   type CapturedContributionMedia,
   type CaptureMode,
   type GpsSnapshot,
@@ -29,17 +26,20 @@ import {
 import { reverseGeocode } from '@/entities/place';
 
 import { styles } from './CameraContributionScreen.styles';
-import { TagReviewScreen } from './TagReviewScreen';
+import { TagReviewScreen, type UserMeasurementsInput } from './TagReviewScreen';
 import { FinalScorecardScreen } from './FinalScorecardScreen';
 import {
   verifyWithAiOrFallback,
   type VerificationMatrixResult,
   type VerificationMatrixInput,
 } from '../../lib/verificationEngine';
-import { runAiPreScan, type PreScanFeatureTag } from '../../api/aiPreScanService';
+import { runAiPreScan, runAiVideoPreScan, type PreScanFeatureTag } from '../../api/aiPreScanService';
+import { matchSelectedTagsWithCvDetections } from '../../model/tagReviewModel';
 import { getPoiAnchorCoords } from '../../testing/mocks/mockPoiAnchor';
 import { TestGalleryPickerButton } from '../../testing/components/TestGalleryPickerButton';
+import { fetchPlaceById } from '@/entities/place';
 import { LocationSelectionModal, type SelectedLocationData } from '../components/location/LocationSelectionModal';
+
 
 type CameraType = 'back' | 'front';
 
@@ -73,6 +73,26 @@ function ActiveCameraContributionScreen() {
   const flow = firstParam(params.flow, 'contribute');
   const paramLat = parseFloat(firstParam(params.latitude, ''));
   const paramLng = parseFloat(firstParam(params.longitude, ''));
+
+  const [poiCoordsState, setPoiCoordsState] = useState<{ latitude: number; longitude: number } | null>(() => {
+    if (!isNaN(paramLat) && !isNaN(paramLng)) {
+      return { latitude: paramLat, longitude: paramLng };
+    }
+    return null;
+  });
+
+  useEffect(() => {
+    if (!poiCoordsState && locationId) {
+      void fetchPlaceById(locationId).then((place) => {
+        if (place && !isNaN(place.lat) && !isNaN(place.lng) && place.lat !== 0 && place.lng !== 0) {
+          setPoiCoordsState({ latitude: place.lat, longitude: place.lng });
+        }
+      });
+    }
+  }, [locationId, poiCoordsState]);
+
+  const targetPoiCoords = poiCoordsState ?? getPoiAnchorCoords(locationId, locationName);
+
   const cameraRef = useRef<any>(null);
   const requestedInitialPermissions = useRef(false);
   const recordingStartedAt = useRef<number | null>(null);
@@ -101,16 +121,18 @@ function ActiveCameraContributionScreen() {
   const [currentAddress, setCurrentAddress] = useState<string | null>(null);
   const [gpsState, setGpsState] = useState<'loading' | 'available' | 'denied' | 'unavailable'>('loading');
   const [capturedMedia, setCapturedMedia] = useState<CapturedContributionMedia | null>(null);
-  const [savedLocally, setSavedLocally] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
   // Workflow 1 Multi-step Verification State
-  const [workflowStep, setWorkflowStep] = useState<'camera' | 'tag_review' | 'final_scorecard' | 'video_preview'>('camera');
+  const [workflowStep, setWorkflowStep] = useState<'camera' | 'tag_review' | 'final_scorecard'>('camera');
   const [preScanTags, setPreScanTags] = useState<PreScanFeatureTag[]>([]);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const [isPreScanning, setIsPreScanning] = useState(false);
+  const [videoPreviewUri, setVideoPreviewUri] = useState<string | null>(null);
   const [confirmedTagKeys, setConfirmedTagKeys] = useState<string[]>([]);
+  const [userObservations, setUserObservations] = useState<Record<string, 'present' | 'absent'>>({});
   const [fieldNotes, setFieldNotes] = useState('');
+  const [userMeasurements, setUserMeasurements] = useState<UserMeasurementsInput | null>(null);
   const [matrixResult, setMatrixResult] = useState<VerificationMatrixResult | null>(null);
 
   const locationSubscription = useRef<Location.LocationSubscription | null>(null);
@@ -254,10 +276,19 @@ function ActiveCameraContributionScreen() {
 
   useEffect(() => {
     if (!isRecording) return;
+    let stopTriggered = false;
     const interval = setInterval(() => {
-      if (recordingStartedAt.current != null) {
-        setRecordingSeconds(Math.floor((Date.now() - recordingStartedAt.current) / 1000));
+      if (recordingStartedAt.current == null) return;
+      const elapsedSeconds = Math.floor((Date.now() - recordingStartedAt.current) / 1000);
+      if (elapsedSeconds >= 10) {
+        setRecordingSeconds(10);
+        if (!stopTriggered) {
+          stopTriggered = true;
+          cameraRef.current?.stopRecording();
+        }
+        return;
       }
+      setRecordingSeconds(elapsedSeconds);
     }, 250);
     return () => clearInterval(interval);
   }, [isRecording]);
@@ -320,17 +351,20 @@ function ActiveCameraContributionScreen() {
     [capturedMedia]
   );
 
-  const startPreScanForPhoto = useCallback((media: CapturedContributionMedia) => {
+  const startPreScanForMedia = useCallback((media: CapturedContributionMedia) => {
     setCapturedMedia(media);
     setWorkflowStep('tag_review');
     setIsPreScanning(true);
     setPreScanTags([]);
     setAiSummary(null);
+    setVideoPreviewUri(null);
 
-    void runAiPreScan(media.uri).then((result) => {
+    const request = media.type === 'video' ? runAiVideoPreScan(media.uri) : runAiPreScan(media.uri);
+    void request.then((result) => {
       if (!mounted.current) return;
       setPreScanTags(result.features);
       setAiSummary(result.summary);
+      setVideoPreviewUri(result.previewFrameUri ?? null);
       setIsPreScanning(false);
     });
   }, []);
@@ -340,7 +374,7 @@ function ActiveCameraContributionScreen() {
     setIsCapturing(true);
     setMessage(null);
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.55, skipProcessing: true, base64: true });
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.75, skipProcessing: false, base64: true });
       if (!mounted.current) return;
       const media: CapturedContributionMedia = {
         id: createMediaId(),
@@ -354,13 +388,13 @@ function ActiveCameraContributionScreen() {
         locationName: targetLocationName,
         gps: targetCoords ? { latitude: targetCoords.latitude, longitude: targetCoords.longitude, accuracy: 5.0, timestamp: Date.now() } : gps,
       };
-      startPreScanForPhoto(media);
+      startPreScanForMedia(media);
     } catch {
       setMessage('Không thể chụp ảnh. Hãy giữ thiết bị ổn định và thử lại.');
     } finally {
       if (mounted.current) setIsCapturing(false);
     }
-  }, [cameraReady, gps, isCapturing, startPreScanForPhoto, targetCoords, targetLocationId, targetLocationName]);
+  }, [cameraReady, gps, isCapturing, startPreScanForMedia, targetCoords, targetLocationId, targetLocationName]);
 
   const startVideoRecording = useCallback(async () => {
     if (!cameraRef.current || !cameraReady || isCapturing) return;
@@ -369,35 +403,21 @@ function ActiveCameraContributionScreen() {
     setRecordingSeconds(0);
     recordingStartedAt.current = Date.now();
 
-    const timer = setInterval(() => {
-      if (!mounted.current) return;
-      setRecordingSeconds((prev) => {
-        if (prev >= 10) {
-          cameraRef.current?.stopRecording();
-          return 10;
-        }
-        return prev + 1;
-      });
-    }, 1000);
-
     try {
-      const result = await cameraRef.current.recordAsync({
-        maxDuration: 10,
-        mute: true,
-      });
-      const durationSeconds = recordingStartedAt.current == null
-        ? 0
-        : Math.max(1, Math.round((Date.now() - recordingStartedAt.current) / 1000));
+      const recordOptions = Platform.OS === 'ios' ? { maxDuration: 10, codec: 'avc1' as const } : { maxDuration: 10 };
+      const result = await cameraRef.current.recordAsync(recordOptions);
+      const elapsedMs = recordingStartedAt.current == null ? 0 : Date.now() - recordingStartedAt.current;
+      const durationSeconds = Math.min(10, Math.floor(elapsedMs / 1000));
 
       if (durationSeconds < 5) {
         if (mounted.current) {
-          setMessage('Video quá ngắn (< 5s). Vui lòng quay từ 5–10 giây để ghi nhận đủ bằng chứng tiếp cận (BR-01).');
+          setMessage('Video quá ngắn (dưới 5 giây). Vui lòng quay từ 5–10 giây để ghi rõ lối đi.');
         }
         return;
       }
 
       if (result?.uri && mounted.current) {
-        setCapturedMedia({
+        startPreScanForMedia({
           id: createMediaId(),
           type: 'video',
           uri: result.uri,
@@ -407,19 +427,17 @@ function ActiveCameraContributionScreen() {
           locationName: targetLocationName,
           gps: targetCoords ? { latitude: targetCoords.latitude, longitude: targetCoords.longitude, accuracy: 5.0, timestamp: Date.now() } : gps,
         });
-        setWorkflowStep('video_preview');
       }
     } catch {
       if (mounted.current) setMessage('Không thể hoàn tất video. Vui lòng thử quay lại.');
     } finally {
-      clearInterval(timer);
       recordingStartedAt.current = null;
       if (mounted.current) {
         setIsRecording(false);
         setRecordingSeconds(0);
       }
     }
-  }, [cameraReady, gps, isCapturing, targetCoords, targetLocationId, targetLocationName]);
+  }, [cameraReady, gps, isCapturing, startPreScanForMedia, targetCoords, targetLocationId, targetLocationName]);
 
   const handleCapture = useCallback(() => {
     if (isRecording) {
@@ -432,62 +450,35 @@ function ActiveCameraContributionScreen() {
 
   const handleRetake = useCallback(() => {
     setCapturedMedia(null);
-    setSavedLocally(false);
     setCameraReady(false);
     setMessage(null);
     setWorkflowStep('camera');
     setMatrixResult(null);
+    setUserObservations({});
+    setVideoPreviewUri(null);
   }, []);
 
   const handleProceedToVerification = useCallback(
-    async (selectedKeys: string[], notes: string) => {
+    async (
+      selectedKeys: string[],
+      notes: string,
+      measurements?: UserMeasurementsInput,
+      confirmedObservations?: Record<string, 'present' | 'absent'>
+    ) => {
       if (!capturedMedia) return;
       setConfirmedTagKeys(selectedKeys);
       setFieldNotes(notes);
-
-      // Map QCVN sub-features to their pre-scan parent detection keys
-      const PARENT_MAP: Record<string, string> = {
-        ramp_slope_comfortable: 'exterior_ramp_present',
-        ramp_handrails_present: 'exterior_ramp_present',
-        door_width_wide: 'door_width_ok',
-        door_threshold_flat: 'door_width_ok',
-        door_handle_lever: 'door_width_ok',
-        door_lever_handle: 'door_width_ok',
-        elevator_accessible: 'elevator_present',
-        restroom_accessible_stall: 'accessible_restroom_sign',
-        restroom_grab_bars: 'accessible_restroom_sign',
-        tactile_paving_guiding: 'tactile_paving_present',
-        tactile_paving_warning: 'tactile_paving_present',
-      };
+      setUserMeasurements(measurements ?? null);
+      if (confirmedObservations) {
+        setUserObservations(confirmedObservations);
+      }
 
       const detectedPreScan = preScanTags.filter((t) => t.detected && t.confidence > 0);
       const detectedMap = new Map(detectedPreScan.map((t) => [t.key, t.confidence]));
-
-      // Determine CV confidence strictly based on actual detections verified in the photo
-      let cvConfidence = 0.0;
-      let matchedCount = 0;
-      if (selectedKeys.length > 0 && detectedMap.size > 0) {
-        let totalConfidence = 0;
-
-        for (const key of selectedKeys) {
-          const directConf = detectedMap.get(key);
-          if (directConf !== undefined) {
-            matchedCount++;
-            totalConfidence += directConf;
-          } else {
-            const parentKey = PARENT_MAP[key];
-            if (parentKey && detectedMap.has(parentKey)) {
-              matchedCount++;
-              totalConfidence += detectedMap.get(parentKey)!;
-            }
-          }
-        }
-
-        if (matchedCount > 0) {
-          // Proportionate CV confidence across all claimed tags
-          cvConfidence = totalConfidence / selectedKeys.length;
-        }
-      }
+      const { matchedCount, cvConfidence } = matchSelectedTagsWithCvDetections(
+        selectedKeys,
+        detectedMap
+      );
 
       const verifiedTagCount = matchedCount;
       const unverifiedTagCount = Math.max(0, selectedKeys.length - matchedCount);
@@ -501,11 +492,7 @@ function ActiveCameraContributionScreen() {
         : null;
 
       const poiCoords =
-        targetCoords
-          ? targetCoords
-          : !isNaN(paramLat) && !isNaN(paramLng)
-          ? { latitude: paramLat, longitude: paramLng }
-          : getPoiAnchorCoords(targetLocationId, targetLocationName, contributorCoords);
+        targetCoords ?? targetPoiCoords ?? getPoiAnchorCoords(targetLocationId, targetLocationName, contributorCoords);
 
       const evalInput: VerificationMatrixInput = {
         cvConfidence,
@@ -522,7 +509,8 @@ function ActiveCameraContributionScreen() {
       setMatrixResult(result);
       setWorkflowStep('final_scorecard');
     },
-    [capturedMedia, paramLat, paramLng, preScanTags, targetCoords, targetLocationId, targetLocationName]
+    [capturedMedia, paramLat, paramLng, preScanTags, targetCoords, targetLocationId, targetLocationName, targetPoiCoords]
+
   );
 
   // Workflow 1: Final Scorecard Screen
@@ -533,7 +521,9 @@ function ActiveCameraContributionScreen() {
           media={capturedMedia}
           matrixResult={matrixResult}
           selectedTagKeys={confirmedTagKeys}
+          confirmedObservations={userObservations}
           notes={fieldNotes}
+          userMeasurements={userMeasurements}
           locationName={targetLocationName}
           locationAddress={targetAddress}
           onChangeLocation={() => setShowLocationModal(true)}
@@ -561,11 +551,13 @@ function ActiveCameraContributionScreen() {
       <>
         <TagReviewScreen
           media={capturedMedia}
+          previewFrameUri={videoPreviewUri}
           availableTags={preScanTags}
           aiSummary={aiSummary}
           isPreScanning={isPreScanning}
           locationName={targetLocationName}
           locationAddress={targetAddress}
+          initialObservations={userObservations as any}
           onChangeLocation={() => setShowLocationModal(true)}
           onProceedToVerification={handleProceedToVerification}
           onRetake={handleRetake}
@@ -581,36 +573,6 @@ function ActiveCameraContributionScreen() {
           onClose={() => setShowLocationModal(false)}
         />
       </>
-    );
-  }
-
-  // Video fallback preview
-  if (workflowStep === 'video_preview' && capturedMedia) {
-    return (
-      <MediaPreview
-        media={capturedMedia}
-        savedLocally={savedLocally}
-        onBack={handleBack}
-        onRetake={handleRetake}
-        onUse={(confirmedTags, customName, notes) => {
-          setPendingContributionMedia(capturedMedia);
-          addContributionRecord({
-            id: createMediaId(),
-            locationId: targetLocationId,
-            locationName: customName || targetLocationName,
-            mediaUri: capturedMedia.uri,
-            mediaType: capturedMedia.type,
-            featureTags: confirmedTags,
-            textDescription: notes,
-            gps: gps ? { latitude: gps.latitude, longitude: gps.longitude } : null,
-            status: 'Auto-Verified',
-            confidenceScore: 0.88,
-            pointsAwarded: 50,
-            createdAt: Date.now(),
-          });
-          setSavedLocally(true);
-        }}
-      />
     );
   }
 
@@ -687,17 +649,6 @@ function ActiveCameraContributionScreen() {
             <Text style={styles.messageText}>{message}</Text>
           </Pressable>
         ) : null}
-        {__DEV__ && (
-          <View style={{ alignItems: 'center', marginBottom: 12 }}>
-            <TestGalleryPickerButton
-              locationId={targetLocationId}
-              locationName={targetLocationName}
-              onMediaPicked={(media) => {
-                startPreScanForPhoto(media);
-              }}
-            />
-          </View>
-        )}
         <CaptureControls
           mode={mode}
           isRecording={isRecording}
@@ -708,7 +659,22 @@ function ActiveCameraContributionScreen() {
           onFlip={() => {
             setFacing((current: CameraType) => (current === 'back' ? 'front' : 'back'));
           }}
+          leftAction={
+            __DEV__ ? (
+              <TestGalleryPickerButton
+                locationId={targetLocationId}
+                locationName={targetLocationName}
+                targetCoordinates={targetCoords ?? targetPoiCoords}
+                mode={mode}
+                disabled={isRecording || isCapturing}
+                onMediaPicked={(media) => {
+                  startPreScanForMedia(media);
+                }}
+              />
+            ) : null
+          }
         />
+
       </View>
       <LocationSelectionModal
         visible={showLocationModal}

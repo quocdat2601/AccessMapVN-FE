@@ -30,6 +30,7 @@ export interface ContributionLocation {
 
 export interface ContributionSubmissionRecord {
   id: string;
+  submissionCode?: string;
   locationId: string;
   locationName: string;
   mediaUri: string;
@@ -42,6 +43,7 @@ export interface ContributionSubmissionRecord {
     | 'AIProcessing'
     | 'AwaitingMoreInfo'
     | 'PendingModeration'
+    | 'NeedsSupplement'
     | 'Published'
     | 'Rejected'
     | 'Cancelled'

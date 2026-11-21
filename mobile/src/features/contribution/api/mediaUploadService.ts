@@ -19,6 +19,49 @@ function base64ToUint8Array(base64: string): Uint8Array {
   return bytes;
 }
 
+async function resolveBase64(uri: string, existingBase64?: string): Promise<string | undefined> {
+  if (existingBase64 && existingBase64.trim().length > 0) {
+    return existingBase64;
+  }
+  try {
+    const res = await fetch(uri);
+    const blob = await res.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        if (typeof result === 'string') {
+          const comma = result.indexOf(',');
+          resolve(comma >= 0 ? result.substring(comma + 1) : result);
+        } else {
+          resolve(undefined);
+        }
+      };
+      reader.onerror = () => resolve(undefined);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function getMediaFileInfo(uri: string): { ext: string; mimeType: string; isVideo: boolean } {
+  const cleanPath = uri.split('?')[0].toLowerCase();
+  if (cleanPath.endsWith('.mp4')) {
+    return { ext: 'mp4', mimeType: 'video/mp4', isVideo: true };
+  }
+  if (cleanPath.endsWith('.mov')) {
+    return { ext: 'mov', mimeType: 'video/quicktime', isVideo: true };
+  }
+  if (cleanPath.endsWith('.webm')) {
+    return { ext: 'webm', mimeType: 'video/webm', isVideo: true };
+  }
+  if (cleanPath.endsWith('.png')) {
+    return { ext: 'png', mimeType: 'image/png', isVideo: false };
+  }
+  return { ext: 'jpg', mimeType: 'image/jpeg', isVideo: false };
+}
+
 /**
  * Uploads a local photo (from camera capture or picker) to Supabase Cloud Storage (primary)
  * or to the local backend as a fallback.
@@ -28,28 +71,38 @@ export async function uploadMediaToBackend(
   uri: string,
   base64?: string
 ): Promise<string> {
-  const ext = uri.endsWith('.png') ? 'png' : 'jpg';
-  const mimeType = ext === 'png' ? 'image/png' : 'image/jpeg';
+  const { ext, mimeType, isVideo } = getMediaFileInfo(uri);
   const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${ext}`;
+  const effectiveBase64 = isVideo ? undefined : await resolveBase64(uri, base64);
 
   // 1. Try Supabase Storage first (Cloud storage accessible by everyone globally)
-  if (isSupabaseConfigured && base64) {
+  if (isSupabaseConfigured && (isVideo || effectiveBase64)) {
     try {
-      const fileBytes = base64ToUint8Array(base64);
-      const { data, error } = await supabase.storage
-        .from('contributions-media')
-        .upload(fileName, fileBytes, {
-          contentType: mimeType,
-          upsert: true,
-        });
+      let fileBody: Uint8Array | ArrayBuffer | undefined;
+      if (isVideo) {
+        const res = await fetch(uri);
+        fileBody = await res.arrayBuffer();
+      } else if (effectiveBase64) {
+        fileBody = base64ToUint8Array(effectiveBase64);
+      }
 
-      if (!error && data) {
-        const { data: publicUrlData } = supabase.storage
+      if (fileBody) {
+        const { data, error } = await supabase.storage
           .from('contributions-media')
-          .getPublicUrl(fileName);
+          .upload(fileName, fileBody, {
+            contentType: mimeType,
+            cacheControl: '31536000',
+            upsert: true,
+          });
 
-        if (publicUrlData?.publicUrl) {
-          return publicUrlData.publicUrl;
+        if (!error && data) {
+          const { data: publicUrlData } = supabase.storage
+            .from('contributions-media')
+            .getPublicUrl(fileName);
+
+          if (publicUrlData?.publicUrl) {
+            return publicUrlData.publicUrl;
+          }
         }
       }
     } catch (e) {
@@ -59,17 +112,29 @@ export async function uploadMediaToBackend(
 
   // 2. Fallback to backend upload if Supabase Storage failed or offline
   const baseUrl = resolveServiceUrl(5256, process.env.EXPO_PUBLIC_API_URL);
-  if (base64) {
+  let authHeaders: Record<string, string> = {};
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (token) {
+      authHeaders = { Authorization: `Bearer ${token}` };
+    }
+  } catch {
+    // Continue without auth header if session lookup fails
+  }
+
+  if (!isVideo && effectiveBase64) {
     try {
       const response = await fetch(`${baseUrl}/api/v1/media/upload-base64`, {
         method: 'POST',
         headers: {
+          ...authHeaders,
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
         body: JSON.stringify({
           fileName,
-          base64Data: base64,
+          base64Data: effectiveBase64,
         }),
       });
 
@@ -96,6 +161,7 @@ export async function uploadMediaToBackend(
     const response = await fetch(`${baseUrl}/api/v1/media/upload`, {
       method: 'POST',
       headers: {
+        ...authHeaders,
         Accept: 'application/json',
       },
       body: formData,

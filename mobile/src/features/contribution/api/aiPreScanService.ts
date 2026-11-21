@@ -1,16 +1,12 @@
-let isAndroid = false;
-try {
-  const { Platform } = require('react-native');
-  isAndroid = Platform?.OS === 'android';
-} catch {
-  isAndroid = false;
-}
+export type FeatureStatus = 'present' | 'absent' | 'unknown';
 
 export interface PreScanFeatureTag {
   key: string;
   label: string;
+  status: FeatureStatus;
   detected: boolean;
   confidence: number;
+  reason?: string;
 }
 
 import { postMultipart, resolveServiceUrl } from '@/shared/api/client';
@@ -19,18 +15,49 @@ export interface PreScanResult {
   features: PreScanFeatureTag[];
   summary: string;
   isMockFallback?: boolean;
+  previewFrameUri?: string | null;
 }
 
 interface AiPreScanPayload {
-  features?: Record<string, { value?: boolean; detected?: boolean; confidence?: number }>;
+  features?: Record<string, { value?: boolean | string; detected?: boolean; confidence?: number; reason?: string }>;
   summary?: string;
 }
 
+interface AiVideoSuggestionPayload {
+  value?: string;
+  evidence?: Array<{
+    frame_id?: string;
+    timestamp_seconds?: number;
+    detector_confidence?: number;
+  }>;
+}
+
+interface AiVideoPreScanPayload {
+  processing_status?: string;
+  frames_sampled?: number;
+  frames_analyzed?: number;
+  suggestions?: Record<string, AiVideoSuggestionPayload>;
+  warnings?: string[];
+  preview_frame_data_uri?: string | null;
+}
+
+const VIDEO_SUGGESTION_KEY_MAP: Record<string, string> = {
+  ramp_present: 'exterior_ramp_present',
+  steps_present: 'steps_present',
+  elevator_present: 'elevator_present',
+  door_detected: 'door_detected',
+  accessible_restroom_sign: 'accessible_restroom_sign',
+  tactile_paving_present: 'tactile_paving_present',
+};
+
 const FEATURE_LABEL_MAP: Record<string, string> = {
-  exterior_ramp_present: 'Ram dốc tiếp cận',
+  exterior_ramp_present: 'Ram dốc',
+  ramp_slope_compliant: 'Dốc thoải',
   steps_present: 'Bậc thang',
   elevator_present: 'Thang máy tiếp cận',
-  door_width_ok: 'Cửa rộng ≥80cm',
+  door_detected: 'Cửa ra vào',
+  door_width_compliant: 'Cửa ra vào',
+  door_width_ok: 'Cửa ra vào',
   accessible_restroom_sign: 'WC tiếp cận',
   tactile_paving_present: 'Lối đi xúc giác',
 };
@@ -42,6 +69,7 @@ function generateFallbackResult(): PreScanResult {
     features: Object.entries(FEATURE_LABEL_MAP).map(([key, label]) => ({
       key,
       label,
+      status: 'unknown',
       detected: false,
       confidence: 0,
     })),
@@ -49,9 +77,6 @@ function generateFallbackResult(): PreScanResult {
 }
 
 export async function runAiPreScan(imageUri: string, textDescription?: string): Promise<PreScanResult> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
-
   try {
     const formData = new FormData();
     formData.append('images', {
@@ -67,19 +92,27 @@ export async function runAiPreScan(imageUri: string, textDescription?: string): 
     const aiBaseUrl = resolveServiceUrl(8000, process.env.EXPO_PUBLIC_AI_SERVICE_URL);
     console.log('[runAiPreScan] Calling:', `${aiBaseUrl}/api/v1/ai/pre-scan`, 'with imageUri:', imageUri);
     const data = await postMultipart<AiPreScanPayload>(`${aiBaseUrl}/api/v1/ai/pre-scan`, formData, 15000);
-    clearTimeout(timeoutId);
 
     console.log('[runAiPreScan] SUCCESS data:', JSON.stringify(data));
     const rawFeatures = data.features || {};
 
     const features: PreScanFeatureTag[] = Object.keys(rawFeatures).map((key) => {
       const item = rawFeatures[key];
-      const detected = item?.value === true || item?.detected === true;
+      const rawVal = item?.value;
+      const status: FeatureStatus =
+        rawVal === 'present' || rawVal === true
+          ? 'present'
+          : rawVal === 'absent' || rawVal === false
+          ? 'absent'
+          : 'unknown';
+
       return {
         key,
         label: FEATURE_LABEL_MAP[key] ?? key,
-        detected,
-        confidence: typeof item?.confidence === 'number' ? item.confidence : 0.8,
+        status,
+        detected: status === 'present',
+        confidence: typeof item?.confidence === 'number' ? item.confidence : 0.0,
+        reason: item?.reason,
       };
     });
 
@@ -89,9 +122,67 @@ export async function runAiPreScan(imageUri: string, textDescription?: string): 
       isMockFallback: false,
     };
   } catch (error) {
-    clearTimeout(timeoutId);
     console.warn('[runAiPreScan] FAILED:', error);
     // Graceful fallback allows instant testing on device even if ai-service is not currently launched locally
+    return generateFallbackResult();
+  }
+}
+
+export async function runAiVideoPreScan(videoUri: string): Promise<PreScanResult> {
+  try {
+    const isMov = videoUri.split('?')[0].toLowerCase().endsWith('.mov');
+    const formData = new FormData();
+    formData.append('video', {
+      uri: videoUri,
+      name: isMov ? 'clip.mov' : 'clip.mp4',
+      type: isMov ? 'video/quicktime' : 'video/mp4',
+    } as any);
+
+    const aiBaseUrl = resolveServiceUrl(8000, process.env.EXPO_PUBLIC_AI_SERVICE_URL);
+    console.log('[runAiVideoPreScan] Calling:', `${aiBaseUrl}/api/v1/ai/pre-scan/video`, 'with videoUri:', videoUri);
+    const data = await postMultipart<AiVideoPreScanPayload>(`${aiBaseUrl}/api/v1/ai/pre-scan/video`, formData, 60000);
+
+    const rawSuggestions = data.suggestions || {};
+    const features: PreScanFeatureTag[] = Object.entries(VIDEO_SUGGESTION_KEY_MAP).map(
+      ([suggestionKey, featureKey]) => {
+        const item = rawSuggestions[suggestionKey];
+        const suggestedPresent = item?.value === 'suggested_present';
+        const evidenceList = item?.evidence || [];
+        const maxConfidence = evidenceList.reduce(
+          (best, e) => Math.max(best, typeof e.detector_confidence === 'number' ? e.detector_confidence : 0),
+          0
+        );
+        const status: FeatureStatus = suggestedPresent ? 'present' : 'unknown';
+
+        return {
+          key: featureKey,
+          label: FEATURE_LABEL_MAP[featureKey] ?? featureKey,
+          status,
+          detected: suggestedPresent,
+          confidence: maxConfidence,
+          reason: suggestedPresent
+            ? `Phát hiện trên ${evidenceList.length} khung hình video`
+            : 'Chưa rõ từ khung hình video, vui lòng xác nhận thực tế',
+        };
+      }
+    );
+
+    const detectedLabels = features.filter((f) => f.detected).map((f) => f.label);
+    let summary = `Chưa nhận diện rõ tiện ích qua ${data.frames_analyzed ?? 0} khung hình video. Bạn hãy tự chọn các mục quan sát được bên dưới.`;
+    if (data.processing_status === 'insufficient_visual_quality') {
+      summary = 'Video hơi mờ hoặc thiếu sáng nên chưa phân tích được. Bạn có thể tự chọn đặc điểm bên dưới hoặc quay lại.';
+    } else if (detectedLabels.length > 0) {
+      summary = `Nhận diện thấy ${detectedLabels.join(', ')} qua video (${data.frames_analyzed ?? 0} khung hình). Vui lòng kiểm tra và xác nhận lại bên dưới.`;
+    }
+
+    return {
+      features,
+      summary,
+      isMockFallback: false,
+      previewFrameUri: data.preview_frame_data_uri ?? null,
+    };
+  } catch (error) {
+    console.warn('[runAiVideoPreScan] FAILED:', error);
     return generateFallbackResult();
   }
 }
