@@ -1,10 +1,86 @@
 import { apiClient } from '@/shared/api/client';
+import {
+  fallbackGeocodeFromMocks,
+  fallbackReverseGeocodeFromMocks,
+} from '../lib/geocodeFallback';
 import { MOCK_S901_PLACES } from '../model/mockS901Places';
 import type { BoundingBox, GeocodeResult, PlaceDto, PoiCategory } from '../model/types';
 
 function nullableBoolean(...values: unknown[]): boolean | null {
   const value = values.find((candidate) => candidate !== undefined && candidate !== null);
   return value == null ? null : Boolean(value);
+}
+
+function isVideoUrl(rawUrl?: string | null): boolean {
+  if (!rawUrl) return false;
+  return /\.(mp4|mov|webm|mkv|avi|m4v)(\?|$)/i.test(rawUrl);
+}
+
+function mapPlaceDto(p: any, defaultScoreOnHasData = 80): PlaceDto {
+  const featuresList = Array.isArray(p.features) ? p.features : [];
+  const hasFeature = (typeStr: string) =>
+    featuresList.some(
+      (f: any) =>
+        String(f.featureType ?? '').toLowerCase() === typeStr.toLowerCase() &&
+        String(f.currentStatus ?? '').toLowerCase() === 'available'
+    );
+
+  const hasRamp = hasFeature('Ramp') || Boolean(p.hasRamp ?? p.has_ramp);
+  const hasElevator =
+    hasFeature('Elevator') || Boolean(p.hasAccessibleElevator ?? p.has_accessible_elevator ?? p.has_elevator);
+  const hasRestroom =
+    hasFeature('AccessibleRestroom') || Boolean(p.hasAccessibleRestroom ?? p.has_accessible_restroom);
+  const hasDoor = hasFeature('EntranceDoor') || nullableBoolean(p.doorWidthOk, p.door_width_ok);
+
+  const rawScore =
+    typeof p.accessibilityScore === 'number'
+      ? p.accessibilityScore
+      : typeof p.accessibility_score === 'number'
+      ? p.accessibility_score
+      : p.hasAccessibilityData || featuresList.length > 0
+      ? defaultScoreOnHasData
+      : -1;
+
+  return {
+    id: String(p.locationId ?? p.id ?? ''),
+    name: String(p.name ?? ''),
+    category: (p.category ?? 'other') as PoiCategory,
+    address: p.address ?? null,
+    phone: p.phone ?? null,
+    website: p.website ?? null,
+    opening_hours: p.openingHours ?? p.opening_hours ?? null,
+    brand: p.brand ?? null,
+    operator: p.operator ?? null,
+    lng: Number(p.longitude ?? p.lng ?? 0),
+    lat: Number(p.latitude ?? p.lat ?? 0),
+    has_ramp: hasRamp,
+    has_elevator: hasElevator,
+    has_tactile_paving: Boolean(p.hasTactilePaving ?? p.has_tactile_paving),
+    has_accessible_restroom: hasRestroom,
+    door_width_ok: hasDoor,
+    accessibility_score: rawScore,
+    accessibility_note: p.accessibilityNote ?? p.accessibility_note ?? featuresList[0]?.qcvnSummaryText ?? null,
+    floor_level: p.floorLevel ?? p.floor_level ?? null,
+    building_id: p.buildingId ?? p.building_id ?? null,
+    scope: p.scope ?? null,
+    has_accessible_elevator: hasElevator,
+    has_accessible_parking: Boolean(p.hasAccessibleParking ?? p.has_accessible_parking),
+    has_step_free: Boolean(
+      p.hasStepFree ?? p.has_step_free ?? hasRamp ?? p.has_ramp ?? p.doorWidthOk ?? p.door_width_ok
+    ),
+    last_verified_at: featuresList[0]?.verifiedAt ?? p.lastVerifiedAt ?? p.last_verified_at ?? null,
+    legacy_feature_values: {
+      ramp: featuresList.length > 0 ? hasRamp : nullableBoolean(p.hasRamp, p.has_ramp),
+      entranceDoor: hasDoor,
+      elevator:
+        featuresList.length > 0
+          ? hasElevator
+          : nullableBoolean(p.hasAccessibleElevator, p.has_accessible_elevator, p.has_elevator),
+      accessibleRestroom:
+        featuresList.length > 0 ? hasRestroom : nullableBoolean(p.hasAccessibleRestroom, p.has_accessible_restroom),
+      tactilePaving: nullableBoolean(p.hasTactilePaving, p.has_tactile_paving),
+    },
+  };
 }
 
 function filterMockPlacesInBBox(bbox: BoundingBox): PlaceDto[] {
@@ -23,59 +99,41 @@ export async function fetchPlacesInBBox(
   try {
     const centerLat = (bbox.north + bbox.south) / 2;
     const centerLng = (bbox.east + bbox.west) / 2;
-    // Bounded search radius in meters approximating bbox span
-    const radiusMeters = Math.min(5000, Math.max(500, Math.round(
-      Math.abs(bbox.north - bbox.south) * 111320 / 2
-    )));
+    const radiusMeters = Math.min(
+      5000,
+      Math.max(500, Math.round((Math.abs(bbox.north - bbox.south) * 111320) / 2))
+    );
 
-    const raw = await apiClient.get<any>('/api/v1/locations/search', {
-      params: {
-        lat: centerLat,
-        lng: centerLng,
-        radiusMeters,
-        limit: 30,
-        source: 'accessmap',
-      },
-      auth: 'none',
-    });
+    let items: any[] | null = null;
+    try {
+      const raw = await apiClient.get<any>('/api/v1/locations/search', {
+        params: {
+          lat: centerLat,
+          lng: centerLng,
+          radiusMeters,
+          limit: 30,
+          source: 'accessmap',
+        },
+        auth: 'none',
+      });
+      items = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : null;
+    } catch {
+      const legacyRaw = await apiClient.get<any[]>('/api/v1/places', {
+        params: {
+          minLng: bbox.west,
+          minLat: bbox.south,
+          maxLng: bbox.east,
+          maxLat: bbox.north,
+          zoomLevel,
+          categories: categories?.join(','),
+        },
+      });
+      items = Array.isArray(legacyRaw) ? legacyRaw : null;
+    }
 
-    const items = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : null);
     if (!items) return mockMatches;
 
-    const mapped: PlaceDto[] = items.map((p: any) => ({
-      id: String(p.locationId ?? p.id ?? ''),
-      name: String(p.name ?? ''),
-      category: (p.category ?? 'other') as PoiCategory,
-      address: p.address ?? null,
-      phone: p.phone ?? null,
-      website: p.website ?? null,
-      opening_hours: p.openingHours ?? p.opening_hours ?? null,
-      brand: p.brand ?? null,
-      operator: p.operator ?? null,
-      lng: Number(p.longitude ?? p.lng ?? 0),
-      lat: Number(p.latitude ?? p.lat ?? 0),
-      has_ramp: Boolean(p.hasRamp ?? p.has_ramp),
-      has_elevator: Boolean(p.hasAccessibleElevator ?? p.has_accessible_elevator ?? p.has_elevator),
-      has_tactile_paving: Boolean(p.hasTactilePaving ?? p.has_tactile_paving),
-      has_accessible_restroom: Boolean(p.hasAccessibleRestroom ?? p.has_accessible_restroom),
-      door_width_ok: Boolean(p.doorWidthOk ?? p.door_width_ok),
-      accessibility_score: p.hasAccessibilityData ? 80 : -1,
-      accessibility_note: p.accessibilityNote ?? p.accessibility_note ?? null,
-      floor_level: p.floorLevel ?? p.floor_level ?? null,
-      building_id: p.buildingId ?? p.building_id ?? null,
-      has_accessible_elevator: Boolean(p.hasAccessibleElevator ?? p.has_accessible_elevator),
-      has_accessible_parking: Boolean(p.hasAccessibleParking ?? p.has_accessible_parking),
-      has_step_free: Boolean(p.hasStepFree ?? p.has_step_free ?? p.hasRamp ?? p.has_ramp ?? p.doorWidthOk ?? p.door_width_ok),
-      last_verified_at: p.lastVerifiedAt ?? p.last_verified_at ?? null,
-      legacy_feature_values: {
-        ramp: nullableBoolean(p.hasRamp, p.has_ramp),
-        entranceDoor: nullableBoolean(p.doorWidthOk, p.door_width_ok),
-        elevator: nullableBoolean(p.hasAccessibleElevator, p.has_accessible_elevator, p.has_elevator),
-        accessibleRestroom: nullableBoolean(p.hasAccessibleRestroom, p.has_accessible_restroom),
-        tactilePaving: nullableBoolean(p.hasTactilePaving, p.has_tactile_paving),
-      },
-    }));
-
+    const mapped = items.map((p) => mapPlaceDto(p, 80)).filter((p) => Boolean(p.id));
     const existingIds = new Set(mapped.map((m) => m.id));
     for (const mock of mockMatches) {
       if (!existingIds.has(mock.id)) {
@@ -84,7 +142,6 @@ export async function fetchPlacesInBBox(
     }
     return mapped;
   } catch {
-    // Graceful fallback to mock S9.01 places on transient failure
     return mockMatches;
   }
 }
@@ -93,61 +150,16 @@ export async function fetchPlaceById(id: string): Promise<PlaceDto | null> {
   const mockMatch = MOCK_S901_PLACES.find((m) => m.id === id);
   if (mockMatch) return mockMatch;
   try {
-    const p = await apiClient.get<any>(`/api/v1/locations/${encodeURIComponent(id)}`, {
-      auth: 'none',
-    });
-    if (!p) return null;
-
-    const locId = String(p.locationId ?? p.id ?? '');
-    if (!locId) return null;
-
-    // Detect feature presence from PublicPublishedFeatureView list
-    const featuresList = Array.isArray(p.features) ? p.features : [];
-    const hasFeature = (typeStr: string) => featuresList.some((f: any) =>
-      String(f.featureType ?? '').toLowerCase() === typeStr.toLowerCase() &&
-      String(f.currentStatus ?? '').toLowerCase() === 'available'
-    );
-
-    const hasRamp = hasFeature('Ramp') || Boolean(p.hasRamp ?? p.has_ramp);
-    const hasElevator = hasFeature('Elevator') || Boolean(p.hasAccessibleElevator ?? p.has_accessible_elevator ?? p.has_elevator);
-    const hasRestroom = hasFeature('AccessibleRestroom') || Boolean(p.hasAccessibleRestroom ?? p.has_accessible_restroom);
-    const hasDoor = hasFeature('EntranceDoor') || Boolean(p.doorWidthOk ?? p.door_width_ok);
-
-    return {
-      id: locId,
-      name: String(p.name ?? ''),
-      category: (p.category ?? 'other') as PoiCategory,
-      address: p.address ?? null,
-      phone: p.phone ?? null,
-      website: p.website ?? null,
-      opening_hours: p.openingHours ?? p.opening_hours ?? null,
-      brand: p.brand ?? null,
-      operator: p.operator ?? null,
-      lng: Number(p.longitude ?? p.lng ?? 0),
-      lat: Number(p.latitude ?? p.lat ?? 0),
-      has_ramp: hasRamp,
-      has_elevator: hasElevator,
-      has_tactile_paving: Boolean(p.hasTactilePaving ?? p.has_tactile_paving),
-      has_accessible_restroom: hasRestroom,
-      door_width_ok: hasDoor,
-      accessibility_score: typeof p.accessibilityScore === 'number'
-        ? p.accessibilityScore
-        : typeof p.accessibility_score === 'number'
-        ? p.accessibility_score
-        : (p.hasAccessibilityData || featuresList.length > 0 ? 85 : -1),
-      accessibility_note: p.accessibilityNote ?? p.accessibility_note ?? (featuresList[0]?.qcvnSummaryText ?? null),
-      floor_level: p.floorLevel ?? p.floor_level ?? null,
-      building_id: p.buildingId ?? p.building_id ?? null,
-      has_accessible_elevator: hasElevator,
-      last_verified_at: featuresList[0]?.verifiedAt ?? p.lastVerifiedAt ?? p.last_verified_at ?? null,
-      legacy_feature_values: {
-        ramp: hasRamp,
-        entranceDoor: hasDoor,
-        elevator: hasElevator,
-        accessibleRestroom: hasRestroom,
-        tactilePaving: nullableBoolean(p.hasTactilePaving, p.has_tactile_paving),
-      },
-    };
+    let p: any = null;
+    try {
+      p = await apiClient.get<any>(`/api/v1/locations/${encodeURIComponent(id)}`, {
+        auth: 'none',
+      });
+    } catch {
+      p = await apiClient.get<any>(`/api/v1/places/${encodeURIComponent(id)}`);
+    }
+    if (!p || !(p.locationId ?? p.id)) return null;
+    return mapPlaceDto(p, 85);
   } catch {
     return null;
   }
@@ -226,7 +238,7 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string |
       },
       signal: AbortSignal.timeout(3500),
     });
-    if (!res.ok) return null;
+    if (!res.ok) return fallbackReverseGeocodeFromMocks(lat, lng);
     const data = await res.json();
     const formatted = formatNominatim(data);
     if (formatted) {
@@ -237,9 +249,9 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string |
       geocodeCache.set(cacheKey, formatted);
       return formatted;
     }
-    return null;
+    return fallbackReverseGeocodeFromMocks(lat, lng);
   } catch {
-    return null;
+    return fallbackReverseGeocodeFromMocks(lat, lng);
   }
 }
 
@@ -270,11 +282,12 @@ export async function forwardGeocode(
         'User-Agent': 'AccessMapVN/1.0 (https://accessmap.vn)',
         'Accept-Language': 'vi,en;q=0.9',
       },
+      signal: AbortSignal.timeout(2500),
     });
 
-    if (!res.ok) return [];
+    if (!res.ok) return fallbackGeocodeFromMocks(trimmed, limit);
     const data = await res.json();
-    if (!Array.isArray(data)) return [];
+    if (!Array.isArray(data)) return fallbackGeocodeFromMocks(trimmed, limit);
 
     const results: GeocodeResult[] = data.map((item: any) => ({
       id: String(item.place_id ?? `${item.lat},${item.lon}`),
@@ -285,6 +298,10 @@ export async function forwardGeocode(
       type: item.type || item.class,
     }));
 
+    if (results.length === 0) {
+      return fallbackGeocodeFromMocks(trimmed, limit);
+    }
+
     if (forwardGeocodeCache.size > 100) {
       const firstKey = forwardGeocodeCache.keys().next().value;
       if (firstKey) forwardGeocodeCache.delete(firstKey);
@@ -293,7 +310,7 @@ export async function forwardGeocode(
 
     return results;
   } catch {
-    return [];
+    return fallbackGeocodeFromMocks(trimmed, limit);
   }
 }
 
@@ -314,55 +331,36 @@ export async function searchAccessMapPlaces(
   );
 
   try {
-    const raw = await apiClient.get<any>('/api/v1/locations/search', {
-      params: {
-        q: trimmed,
-        lat: options?.lat,
-        lng: options?.lng,
-        limit: options?.limit ?? 10,
-        source: 'accessmap',
-      },
-      auth: 'none',
-    });
+    let items: any[] | null = null;
+    try {
+      const raw = await apiClient.get<any>('/api/v1/locations/search', {
+        params: {
+          q: trimmed,
+          lat: options?.lat,
+          lng: options?.lng,
+          limit: options?.limit ?? 10,
+          source: 'accessmap',
+        },
+        auth: 'none',
+      });
+      items = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : null;
+    } catch {
+      const legacyRaw = await apiClient.get<any[]>('/api/v1/places/search', {
+        params: {
+          q: trimmed,
+          lat: options?.lat,
+          lng: options?.lng,
+          limit: options?.limit ?? 6,
+        },
+        auth: 'none',
+      });
+      items = Array.isArray(legacyRaw) ? legacyRaw : null;
+    }
 
-    const items = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : null);
     if (!items) return localMocks;
 
-    const mapped = items.map((p: any) => ({
-      id: String(p.locationId ?? p.id ?? ''),
-      name: String(p.name ?? ''),
-      category: (p.category ?? 'other') as PoiCategory,
-      address: p.address ?? null,
-      phone: p.phone ?? null,
-      website: p.website ?? null,
-      opening_hours: p.openingHours ?? p.opening_hours ?? null,
-      brand: p.brand ?? null,
-      operator: p.operator ?? null,
-      lng: Number(p.longitude ?? p.lng ?? 0),
-      lat: Number(p.latitude ?? p.lat ?? 0),
-      has_ramp: Boolean(p.hasRamp ?? p.has_ramp),
-      has_elevator: Boolean(p.hasAccessibleElevator ?? p.has_accessible_elevator ?? p.has_elevator),
-      has_tactile_paving: Boolean(p.hasTactilePaving ?? p.has_tactile_paving),
-      has_accessible_restroom: Boolean(p.hasAccessibleRestroom ?? p.has_accessible_restroom),
-      door_width_ok: Boolean(p.doorWidthOk ?? p.door_width_ok),
-      accessibility_score: p.hasAccessibilityData ? 80 : -1,
-      accessibility_note: p.accessibilityNote ?? p.accessibility_note ?? null,
-      floor_level: p.floorLevel ?? p.floor_level ?? null,
-      building_id: p.buildingId ?? p.building_id ?? null,
-      has_accessible_elevator: Boolean(p.hasAccessibleElevator ?? p.has_accessible_elevator),
-      has_accessible_parking: Boolean(p.hasAccessibleParking ?? p.has_accessible_parking),
-      has_step_free: Boolean(p.hasStepFree ?? p.has_step_free ?? p.hasRamp ?? p.has_ramp ?? p.doorWidthOk ?? p.door_width_ok),
-      last_verified_at: p.lastVerifiedAt ?? p.last_verified_at ?? null,
-      legacy_feature_values: {
-        ramp: nullableBoolean(p.hasRamp, p.has_ramp),
-        entranceDoor: nullableBoolean(p.doorWidthOk, p.door_width_ok),
-        elevator: nullableBoolean(p.hasAccessibleElevator, p.has_accessible_elevator, p.has_elevator),
-        accessibleRestroom: nullableBoolean(p.hasAccessibleRestroom, p.has_accessible_restroom),
-        tactilePaving: nullableBoolean(p.hasTactilePaving, p.has_tactile_paving),
-      },
-    }));
-
-    const existingIds = new Set(mapped.map((m: any) => m.id));
+    const mapped = items.map((p) => mapPlaceDto(p, 80)).filter((p) => Boolean(p.id));
+    const existingIds = new Set(mapped.map((m) => m.id));
     return [...localMocks.filter((m) => !existingIds.has(m.id)), ...mapped];
   } catch {
     return localMocks;
@@ -406,38 +404,51 @@ export interface PlaceEvidenceDto {
   subtitle?: string;
   badge: string;
   imageUrl: string;
+  mediaType?: 'photo' | 'video';
+  videoUrl?: string | null;
   featureTags?: string[];
   createdAt?: string;
 }
 
 export async function fetchPlaceEvidence(placeId: string): Promise<PlaceEvidenceDto[]> {
   try {
-    // Attempt fetching public approved media from location detail
-    const detail = await apiClient.get<any>(`/api/v1/locations/${encodeURIComponent(placeId)}`, {
-      auth: 'none',
-    });
-    if (!detail) return [];
-
-    const evidenceList: PlaceEvidenceDto[] = [];
-    if (Array.isArray(detail.features)) {
-      for (const feat of detail.features) {
-        if (Array.isArray(feat.approvedMedia)) {
-          for (const m of feat.approvedMedia) {
-            evidenceList.push({
-              id: String(m.mediaId ?? ''),
-              title: feat.featureType ?? 'Tiện ích tiếp cận',
-              subtitle: feat.qcvnSummaryText ?? 'Đối chiếu QCVN 10:2024/BXD',
-              badge: feat.currentStatus === 'Available' ? 'Đã xác minh' : 'Đang xử lý',
-              imageUrl: m.url ?? '',
-              featureTags: [feat.featureType],
-              createdAt: m.observedAt ?? feat.verifiedAt,
-            });
+    try {
+      const detail = await apiClient.get<any>(`/api/v1/locations/${encodeURIComponent(placeId)}`, {
+        auth: 'none',
+      });
+      if (detail && Array.isArray(detail.features)) {
+        const evidenceList: PlaceEvidenceDto[] = [];
+        for (const feat of detail.features) {
+          if (Array.isArray(feat.approvedMedia)) {
+            for (const m of feat.approvedMedia) {
+              const url = String(m.url ?? '');
+              const isVideo =
+                m.mediaType === 'video' ||
+                String(m.contentType ?? '').startsWith('video/') ||
+                isVideoUrl(url);
+              evidenceList.push({
+                id: String(m.mediaId ?? ''),
+                title: feat.featureType ?? 'Tiện ích tiếp cận',
+                subtitle: feat.qcvnSummaryText ?? 'Đối chiếu QCVN 10:2024/BXD',
+                badge: feat.currentStatus === 'Available' ? 'Đã xác minh' : 'Đang xử lý',
+                imageUrl: url,
+                mediaType: isVideo ? 'video' : 'photo',
+                videoUrl: isVideo ? url : undefined,
+                featureTags: [feat.featureType].filter(Boolean),
+                createdAt: m.observedAt ?? feat.verifiedAt,
+              });
+            }
           }
         }
+        return evidenceList;
       }
+    } catch {
+      // Fallback to legacy endpoint when running against monorepo backend
     }
-    return evidenceList;
+
+    const raw = await apiClient.get<PlaceEvidenceDto[]>(`/api/v1/places/${encodeURIComponent(placeId)}/evidence`);
+    return Array.isArray(raw) ? raw : [];
   } catch {
     return [];
   }
-}
+}

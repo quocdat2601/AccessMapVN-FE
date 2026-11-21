@@ -21,17 +21,21 @@ import Animated, {
 } from 'react-native-reanimated';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/shared/theme';
-import { loadContributionRecords } from '@/entities/contribution';
+import { loadContributionRecords, syncPendingSubmissionsWithBackend } from '@/entities/contribution';
 import { fetchPlaceEvidence } from '@/entities/place';
 import { resolveServiceUrl } from '@/shared/api/client';
 import { useAuth } from '@/features/auth';
 import { LoginRequiredModal } from '@/shared/ui/LoginRequiredModal';
 import {
   castCommunityVote,
+  fetchCommunityState,
   FeatureVerificationModal,
   fetchCommunityComments,
   type AccessibilityFeatureType,
   type CommunityFeatureInput,
+  type CommunityFeatureState,
+  type FeatureCommunityLabel,
+  type PublishedFeatureStatus,
   type SubmittedObservation,
 } from '@/features/community';
 import {
@@ -48,7 +52,12 @@ import { CommunityReviewsSection } from './CommunityReviewsSection';
 import { ContributionCTA } from './ContributionCTA';
 import { EvidenceGallerySection } from './EvidenceGallerySection';
 import { LocationHeader } from './LocationHeader';
-import type { AccessibilityDetailFeature, CommunityReview, EvidenceItem } from './types';
+import type {
+  AccessibilityDetailFeature,
+  CommunityReview,
+  EvidenceItem,
+  FeatureVerificationLevel,
+} from './types';
 
 interface LocationDetailSheetProps {
   place: PlaceDto;
@@ -117,6 +126,12 @@ function calculateDistance(
   return `Cách ${d.toFixed(1)} km`;
 }
 
+function isVideoMediaUrl(url?: string | null): boolean {
+  if (!url) return false;
+  const clean = url.split('?')[0].toLowerCase();
+  return clean.endsWith('.mp4') || clean.endsWith('.mov') || clean.endsWith('.webm');
+}
+
 function resolveEvidenceImageUrl(rawUrl?: string | null): string {
   if (!rawUrl) return '';
   if (rawUrl.startsWith('data:') || rawUrl.startsWith('file://')) return rawUrl;
@@ -131,6 +146,22 @@ function resolveEvidenceImageUrl(rawUrl?: string | null): string {
     return rawUrl.replace('http://127.0.0.1:5256', baseUrl);
   }
   return rawUrl;
+}
+
+function buildVideoMediaUrls(rawUrl?: string | null, resolvedUrl?: string): {
+  thumbnailUrl?: string;
+  videoUrl?: string;
+} {
+  if (!resolvedUrl || resolvedUrl.startsWith('file://')) {
+    return { videoUrl: resolvedUrl || undefined };
+  }
+  const baseUrl = resolveServiceUrl(5256, process.env.EXPO_PUBLIC_API_URL);
+  const paramUrl = rawUrl && rawUrl.startsWith('/uploads/') ? rawUrl : resolvedUrl;
+  const encoded = encodeURIComponent(paramUrl);
+  return {
+    thumbnailUrl: `${baseUrl}/api/v1/media/video-poster?url=${encoded}`,
+    videoUrl: `${baseUrl}/api/v1/media/video-stream?url=${encoded}`,
+  };
 }
 
 export function LocationDetailSheet({
@@ -165,6 +196,9 @@ export function LocationDetailSheet({
   const [reportInitialFeature, setReportInitialFeature] = useState<AccessibilityFeatureType | undefined>(undefined);
   const [reportInitialData, setReportInitialData] = useState<ReportFormData | undefined>(undefined);
   const [verificationRefreshKey, setVerificationRefreshKey] = useState(0);
+  const [liveFeatureStates, setLiveFeatureStates] = useState<
+    Partial<Record<AccessibilityFeatureType, CommunityFeatureState>>
+  >({});
 
   const myCommentsStorageKey = `@accessmap_my_comments_${place.id}`;
 
@@ -182,21 +216,35 @@ export function LocationDetailSheet({
     Number(place.accessibility_score) < 0 ||
     isNaN(Number(place.accessibility_score));
 
-  const rawScore = Number(place.accessibility_score);
-  const trustPercent = isUnrated
-    ? 0
-    : Math.round(rawScore > 1 ? Math.min(rawScore, 100) : Math.max(rawScore * 100, 0));
-
   const [currentTimestamp] = useState(() => Date.now());
   const isRecentVerified = useMemo(() => {
     if (!place.last_verified_at) return false;
-    const diffDays = (currentTimestamp - new Date(place.last_verified_at).getTime()) / (1000 * 60 * 60 * 24);
-    return diffDays >= 0 && diffDays <= 90;
+    const verifiedTime = new Date(place.last_verified_at).getTime();
+    if (isNaN(verifiedTime)) return false;
+    const diffDays = (currentTimestamp - verifiedTime) / (1000 * 60 * 60 * 24);
+    // Tolerate negative diff due to server UTC timestamp vs local time
+    return diffDays >= -2 && diffDays <= 180;
   }, [place.last_verified_at, currentTimestamp]);
 
+  const rawScore = Number(place.accessibility_score);
   const isDemo2 = place.id === '70000000-0000-0000-0000-000000000002';
   const isDemo1 = place.id === '70000000-0000-0000-0000-000000000001';
-  const isFullyVerified = isDemo2 || (!isDemo1 && !isUnrated && trustPercent >= 75 && isRecentVerified);
+  // A location is only fully verified (WF-02) if explicitly audited/certified compliant.
+  // Community submissions (WF-01) represent preliminary surveys without physical dimension audits.
+  const isFullyVerified = isDemo2 || Boolean(
+    (place as any).audit_status === 'verified_compliant' ||
+    (place as any).is_fully_verified === true
+  );
+
+  const normalizedScore = Math.round(
+    rawScore <= 1
+      ? rawScore * 100
+      : rawScore <= 10
+        ? rawScore * 10
+        : Math.min(rawScore, 100)
+  );
+
+  const trustPercent = isUnrated ? 0 : normalizedScore;
 
   const distanceStr = useMemo(
     () => calculateDistance(userLatitude, userLongitude, place.lat, place.lng),
@@ -212,24 +260,125 @@ export function LocationDetailSheet({
     const definitions: (Omit<AccessibilityDetailFeature, 'publishedStatus' | 'status'> & {
       value: boolean | null;
     })[] = [
-      { id: 'ramp', featureType: 'Ramp', icon: 'slope-uphill', label: 'Ram dốc lối vào', description: 'Tiếp cận lối vào bằng ram dốc', value: values.ramp },
+      { id: 'ramp', featureType: 'Ramp', icon: 'slope-uphill', label: 'Ram dốc lối vào', description: 'Tiếp cận lối vào bằng ram dốc', value: values.ramp ?? (place.has_ramp ? true : null) },
       { id: 'door', featureType: 'EntranceDoor', icon: 'door', label: 'Cửa ra vào tiếp cận', description: 'Độ rộng và ngưỡng cửa phù hợp', value: values.entranceDoor },
-      { id: 'elevator', featureType: 'Elevator', icon: 'elevator-passenger', label: 'Thang máy tiếp cận', description: 'Thang máy dành cho lộ trình tiếp cận', value: values.elevator },
-      { id: 'toilet', featureType: 'AccessibleRestroom', icon: 'toilet', label: 'Nhà vệ sinh tiếp cận', description: 'Không gian và tay vịn hỗ trợ', value: values.accessibleRestroom },
-      { id: 'tactile', featureType: 'TactilePaving', icon: 'dots-grid', label: 'Gạch dẫn hướng xúc giác', description: 'Dẫn hướng cho người khiếm thị', value: values.tactilePaving },
+      { id: 'elevator', featureType: 'Elevator', icon: 'elevator-passenger', label: 'Thang máy tiếp cận', description: 'Thang máy dành cho lộ trình tiếp cận', value: values.elevator ?? (place.has_accessible_elevator ? true : null) },
+      { id: 'toilet', featureType: 'AccessibleRestroom', icon: 'toilet', label: 'Nhà vệ sinh tiếp cận', description: 'Không gian và tay vịn hỗ trợ', value: values.accessibleRestroom ?? (place.has_accessible_restroom ? true : null) },
     ];
 
-    return definitions.map(({ value, ...definition }) => ({
-      ...definition,
-      publishedStatus: value == null ? 'Unknown' : value ? 'Available' : 'NotAvailable',
-      status: value ? 'Có sẵn' : 'Không có',
-    }));
-  }, [place]);
+    // WF-02 reads its truth from published LocationFeature rows.
+    // Differentiate features that have verified compliant specs from presence-only reports.
+    return definitions.map(({ value, ...definition }): AccessibilityDetailFeature => {
+      let verificationLevel: FeatureVerificationLevel = 'unknown';
+      let status = 'Chưa rõ';
+      let specLabel: string | undefined;
+
+      if (definition.id === 'door') {
+        if (value === true || place.door_width_ok === true) {
+          verificationLevel = isFullyVerified ? 'verified_compliant' : 'unverified_presence';
+          status = isFullyVerified ? 'Đạt chuẩn' : 'Có cửa vào';
+          specLabel = isFullyVerified ? 'Thông thủy ≥ 90cm' : 'Khảo sát cộng đồng';
+        } else if (isFullyVerified && (value === false || place.door_width_ok === false)) {
+          verificationLevel = 'not_available';
+          status = 'Không có';
+          specLabel = 'Không có cửa riêng';
+        } else {
+          verificationLevel = 'unknown';
+          status = 'Chưa rõ';
+        }
+      } else if (value === true || (definition.id === 'ramp' && place.has_ramp)) {
+        verificationLevel = isFullyVerified ? 'verified_compliant' : 'unverified_presence';
+        status = isFullyVerified ? 'Đạt chuẩn' : 'Có ram dốc';
+        specLabel = isFullyVerified
+          ? (definition.id === 'ramp'
+              ? 'Độ dốc ≤ 1:12'
+              : definition.id === 'elevator'
+                ? 'Bảng nút thấp & chữ nổi'
+                : 'Có tay vịn & quay xe')
+          : 'Khảo sát cộng đồng';
+      } else if (isFullyVerified && value === false) {
+        verificationLevel = 'not_available';
+        status = 'Không có';
+        specLabel = 'Không có tiện ích';
+      } else {
+        // In community surveys, un-surveyed items are unknown, not affirmatively absent
+        verificationLevel = 'unknown';
+        status = 'Chưa rõ';
+      }
+
+      const publishedStatus: PublishedFeatureStatus =
+        verificationLevel === 'verified_compliant' || verificationLevel === 'unverified_presence'
+          ? 'Available'
+          : verificationLevel === 'not_available'
+            ? 'NotAvailable'
+            : 'Unknown';
+
+      return {
+        ...definition,
+        publishedStatus,
+        verificationLevel,
+        status,
+        specLabel,
+      };
+    }).map((item): AccessibilityDetailFeature => {
+      const liveState = liveFeatureStates[item.featureType];
+      if (!liveState) return item;
+
+      let nextVerificationLevel: FeatureVerificationLevel = item.verificationLevel ?? 'unknown';
+      let nextStatus = item.status;
+      if (liveState.publishedStatus === 'Limited') {
+        nextVerificationLevel = 'limited';
+        nextStatus = 'Hạn chế';
+      } else if (liveState.publishedStatus === 'NotAvailable') {
+        nextVerificationLevel = 'not_available';
+        nextStatus = 'Không có';
+      } else if (liveState.publishedStatus === 'Available') {
+        nextVerificationLevel = isFullyVerified ? 'verified_compliant' : 'unverified_presence';
+        nextStatus = isFullyVerified ? 'Đạt chuẩn' : (item.status === 'Chưa rõ' ? 'Có tiện ích' : item.status);
+      }
+
+      return {
+        ...item,
+        publishedStatus: liveState.publishedStatus,
+        verificationLevel: nextVerificationLevel,
+        status: nextStatus,
+        communityLabel: liveState.label as FeatureCommunityLabel,
+        eligibleVoterCount: liveState.eligibleVoterCount,
+        contradictingVoterCount: liveState.contradictingVoterCount,
+        freshnessPercent: Math.round((liveState.freshnessFactor ?? 1) * 100),
+        advisory: liveState.advisory
+          ? { reason: liveState.advisory.reason, endsAt: liveState.advisory.endsAt }
+          : null,
+        featureVersion: liveState.featureVersion,
+      };
+    });
+  }, [place, isFullyVerified, liveFeatureStates]);
 
   const hasPublishedAccessibilityInfo =
     !isUnrated && features.some((feature) => feature.publishedStatus !== 'Unknown');
   const hasDemoCommunityContent = isDemo1 || isDemo2;
-  const showVerificationSection = !isFullyVerified && features.length > 0;
+  const verifiableFeatures = useMemo(() => {
+    if (hasDemoCommunityContent) return features;
+    const known = features.filter((feature) => feature.publishedStatus !== 'Unknown');
+    return known.length > 0 ? known : features;
+  }, [hasDemoCommunityContent, features]);
+  const publishedFeaturesCount = useMemo(() => {
+    if (hasDemoCommunityContent) return features.length;
+    return verifiableFeatures.filter((feature) => feature.publishedStatus === 'Available' || feature.publishedStatus === 'Limited').length;
+  }, [hasDemoCommunityContent, features.length, verifiableFeatures]);
+
+  const displayAccessibilityNote = useMemo(() => {
+    if (place.accessibility_note && place.accessibility_note !== 'Chưa có dữ liệu khảo sát tiếp cận') {
+      return place.accessibility_note;
+    }
+    if (isFullyVerified && publishedFeaturesCount > 0) {
+      return `Đã xác minh đặc tính kỹ thuật đối chiếu QCVN 10:2024/BXD.`;
+    }
+    if (publishedFeaturesCount > 0) {
+      return `Khảo sát sơ bộ: Chưa đo đạc độ dốc ram & chiều rộng cửa. Người dùng xe lăn nên có người trợ giúp.`;
+    }
+    return place.accessibility_note;
+  }, [place.accessibility_note, isFullyVerified, publishedFeaturesCount]);
 
   const handleRequestReportFromFeature = useCallback(
     (feature: CommunityFeatureInput, editingData?: SubmittedObservation['reportData']) => {
@@ -264,13 +413,19 @@ export function LocationDetailSheet({
       formData?: ReportFormData
     ) => {
       if (primaryFeatureType && formData) {
+        const derivedStatus: PublishedFeatureStatus =
+          formData.proposedStatus ??
+          (formData.reason === 'Blocked' || formData.reason === 'Incorrect' ? 'NotAvailable' : 'Limited');
+        const currentVersion = liveFeatureStates[primaryFeatureType]?.featureVersion || 1;
+
         try {
           await castCommunityVote(
             place.id,
             primaryFeatureType,
             {
               voteType: 'Changed',
-              observedFeatureVersion: 1,
+              observedFeatureVersion: currentVersion,
+              proposedStatus: derivedStatus,
               comment: formData.description,
             },
             user?.id ?? 'anon'
@@ -280,7 +435,7 @@ export function LocationDetailSheet({
         const storageKey = `@accessmap_vote_${user?.id ?? 'anon'}_${place.id}_${primaryFeatureType}`;
         const observation: SubmittedObservation = {
           voteType: 'Changed',
-          proposedStatus: 'Limited',
+          proposedStatus: derivedStatus,
           comment: formData.description,
           reportId: report.id,
           reportData: formData,
@@ -294,8 +449,32 @@ export function LocationDetailSheet({
       setVerificationRefreshKey((k) => k + 1);
       setShowVerificationModal(true);
     },
-    [place.id, user]
+    [liveFeatureStates, place.id, user]
   );
+
+  useEffect(() => {
+    let isMounted = true;
+    const coreTypes: AccessibilityFeatureType[] = ['Ramp', 'EntranceDoor', 'Elevator', 'AccessibleRestroom'];
+    void Promise.all(
+      coreTypes.map(async (featureType) => {
+        try {
+          return await fetchCommunityState(place.id, featureType);
+        } catch {
+          return null;
+        }
+      })
+    ).then((results) => {
+      if (!isMounted) return;
+      const next: Partial<Record<AccessibilityFeatureType, CommunityFeatureState>> = {};
+      results.forEach((item) => {
+        if (item) next[item.featureType] = item;
+      });
+      setLiveFeatureStates(next);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [place.id, verificationRefreshKey]);
 
   const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>([]);
   const [communityReviews, setCommunityReviews] = useState<CommunityReview[]>([]);
@@ -304,11 +483,35 @@ export function LocationDetailSheet({
     let isMounted = true;
     function getEvidenceTitle(featureTags?: string[]): string {
       if (!featureTags || featureTags.length === 0) return 'Ảnh khảo sát';
-      if (featureTags.includes('exterior_ramp_present')) return 'Ram dốc';
-      if (featureTags.includes('door_width_ok')) return 'Cửa vào';
-      if (featureTags.includes('elevator_present')) return 'Thang máy';
-      if (featureTags.includes('accessible_restroom')) return 'Nhà vệ sinh';
+      if (featureTags.includes('exterior_ramp_present') || featureTags.includes('ramp_slope_comfortable')) return 'Ram dốc';
+      if (featureTags.includes('door_width_ok') || featureTags.includes('door_threshold_flat')) return 'Cửa vào';
+      if (featureTags.includes('elevator_present') || featureTags.includes('elevator_accessible')) return 'Thang máy';
+      if (featureTags.includes('accessible_restroom') || featureTags.includes('restroom_accessible_stall')) return 'Nhà vệ sinh';
+      if (featureTags.includes('tactile_paving_guiding') || featureTags.includes('tactile_paving_warning')) return 'Lối xúc giác';
       return 'Ảnh khảo sát';
+    }
+
+    function getEvidenceSpec(featureTags?: string[]): { tag: string; icon: string } {
+      if (!featureTags || featureTags.length === 0) return { tag: 'Minh chứng tiếp cận', icon: 'check-circle-outline' };
+      if (featureTags.includes('exterior_ramp_present') || featureTags.includes('ramp_slope_comfortable')) {
+        return { tag: 'Ram dốc', icon: 'slope-uphill' };
+      }
+      if (featureTags.includes('door_width_ok')) {
+        return { tag: 'Cửa ra vào', icon: 'door-open' };
+      }
+      if (featureTags.includes('door_threshold_flat')) {
+        return { tag: 'Ngạch cửa phẳng', icon: 'ray-start-end' };
+      }
+      if (featureTags.includes('elevator_present') || featureTags.includes('elevator_accessible')) {
+        return { tag: 'Thang máy', icon: 'elevator-passenger-outline' };
+      }
+      if (featureTags.includes('accessible_restroom') || featureTags.includes('restroom_accessible_stall')) {
+        return { tag: 'WC cho xe lăn', icon: 'wheelchair-accessibility' };
+      }
+      if (featureTags.includes('tactile_paving_guiding') || featureTags.includes('tactile_paving_warning')) {
+        return { tag: 'Lối đi xúc giác', icon: 'dots-grid' };
+      }
+      return { tag: 'Minh chứng tiếp cận', icon: 'check-circle-outline' };
     }
 
     async function loadEvidence() {
@@ -321,36 +524,60 @@ export function LocationDetailSheet({
           const resolved = resolveEvidenceImageUrl(r.imageUrl);
           if (resolved && !seenUrls.has(resolved)) {
             seenUrls.add(resolved);
+            const spec = getEvidenceSpec(r.featureTags);
+            const isVideo = isVideoMediaUrl(resolved);
+            const videoUrls = isVideo ? buildVideoMediaUrls(r.imageUrl, resolved) : {};
             items.push({
               id: r.id,
               title: r.title || getEvidenceTitle(r.featureTags),
               subtitle: r.createdAt ? new Date(r.createdAt).toLocaleDateString('vi-VN') : (r.subtitle ?? 'Đã công bố'),
               badge: r.badge || 'Đã xác thực',
               imageUrl: resolved,
+              mediaType: isVideo ? 'video' : 'image',
+              thumbnailUrl: isVideo ? videoUrls.thumbnailUrl : resolved,
+              videoUrl: videoUrls.videoUrl,
+              specTag: spec.tag,
+              specIcon: spec.icon,
             });
           }
         });
       } catch {}
 
       try {
+        await syncPendingSubmissionsWithBackend();
         const localRecords = await loadContributionRecords();
         localRecords
-          .filter((r) => r.locationId === place.id && r.mediaUri)
+          .filter(
+            (r) =>
+              r.locationId === place.id &&
+              r.mediaUri &&
+              r.status !== 'Rejected' &&
+              r.status !== 'Auto-Verified' &&
+              r.status !== 'Published'
+          )
           .forEach((r) => {
             const resolved = resolveEvidenceImageUrl(r.mediaUri);
             if (resolved && !seenUrls.has(resolved)) {
               seenUrls.add(resolved);
+              const isVideo = r.mediaType === 'video' || isVideoMediaUrl(resolved);
+              const videoUrls = isVideo ? buildVideoMediaUrls(r.mediaUri, resolved) : {};
               items.push({
                 id: r.id,
-                title: getEvidenceTitle(r.featureTags),
+                title: `${getEvidenceTitle(r.featureTags)} (Chờ duyệt)`,
                 subtitle: new Date(r.createdAt).toLocaleDateString('vi-VN'),
-                badge: 'Đã gửi từ máy này',
+                badge: 'Đang chờ duyệt',
                 imageUrl: resolved,
+                mediaType: isVideo ? 'video' : 'image',
+                thumbnailUrl: isVideo ? videoUrls.thumbnailUrl : resolved,
+                videoUrl: videoUrls.videoUrl,
+                specTag: isVideo ? 'Video · Đang chờ duyệt' : 'Ảnh đóng góp · Đang chờ duyệt',
+                specIcon: 'clock-outline',
               });
             }
           });
       } catch {}
 
+      // Fake demo evidence for the 2 demo venues only
       if (items.length === 0) {
         if (isDemo1) {
           items.push({
@@ -549,15 +776,6 @@ export function LocationDetailSheet({
           >
             <View style={styles.dragHandle} />
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.closeButton}
-            onPress={dismissSheet}
-            accessibilityRole="button"
-            accessibilityLabel="Đóng thông tin địa điểm"
-            activeOpacity={0.72}
-          >
-            <MaterialCommunityIcons name="close" size={19} color={Colors.textSecondary} />
-          </TouchableOpacity>
         </View>
       </GestureDetector>
 
@@ -583,7 +801,7 @@ export function LocationDetailSheet({
               category={localizedCategory}
               brand={place.brand}
               distanceStr={distanceStr}
-              standardLabel={!isUnrated ? 'Đối chiếu QCVN 10:2024' : undefined}
+              standardLabel={isFullyVerified ? 'Đối chiếu QCVN 10:2024' : undefined}
               address={place.address}
               isAddressLoading={place.isAddressLoading}
               openingHours={place.opening_hours}
@@ -591,13 +809,14 @@ export function LocationDetailSheet({
               website={place.website}
               isFavorite={isFavorite}
               onToggleFavorite={onToggleFavorite ? () => onToggleFavorite(place) : undefined}
+              onClose={dismissSheet}
             />
 
             <AccessibilitySummary
               isUnrated={isUnrated}
               trustPercent={trustPercent}
               features={features}
-              note={place.accessibility_note}
+              note={displayAccessibilityNote}
               hasRamp={Boolean(place.has_ramp)}
               doorWidthOk={Boolean(place.door_width_ok)}
               hasTactile={Boolean(place.has_tactile_paving)}
@@ -635,41 +854,6 @@ export function LocationDetailSheet({
                 isVerified={isFullyVerified}
               />
 
-              {showVerificationSection && (
-                <TouchableOpacity
-                  style={styles.verificationCard}
-                  onPress={() => {
-                    if (!user) {
-                      setLoginModalFeature('xác nhận tiện ích tiếp cận');
-                      setShowLoginModal(true);
-                      return;
-                    }
-                    setShowVerificationModal(true);
-                  }}
-                  accessibilityRole="button"
-                  accessibilityLabel="Mở danh sách xác nhận thông tin tiếp cận"
-                  activeOpacity={0.82}
-                >
-                  <View style={styles.verificationCardLeft}>
-                    <View style={styles.verificationCardIconBox}>
-                      <MaterialCommunityIcons name="clipboard-check-outline" size={20} color="#007D78" />
-                    </View>
-                    <View style={styles.verificationCardTextContainer}>
-                      <View style={styles.verificationCardTitleRow}>
-                        <Text style={styles.verificationCardTitle}>Giúp xác nhận thông tin tiếp cận</Text>
-                        <View style={styles.verificationBadge}>
-                          <Text style={styles.verificationBadgeText}>{features.length} tiện ích</Text>
-                        </View>
-                      </View>
-                      <Text style={styles.verificationCardSub}>
-                        Kiểm tra và xác nhận thực tế ram dốc, cửa vào, thang máy, WC...
-                      </Text>
-                    </View>
-                  </View>
-                  <MaterialCommunityIcons name="chevron-right" size={22} color="#007D78" />
-                </TouchableOpacity>
-              )}
-
               <ContributionCTA
                 locationId={place.id}
                 locationName={place.name}
@@ -681,7 +865,7 @@ export function LocationDetailSheet({
                   }
                   onContribute?.(place);
                 }}
-                showReportIssue={hasPublishedAccessibilityInfo}
+                showReportIssue={false}
                 onReportIssue={() => {
                   if (!user) {
                     setLoginModalFeature('báo thay đổi thông tin tiếp cận');
@@ -738,7 +922,7 @@ export function LocationDetailSheet({
         visible={showVerificationModal}
         locationId={place.id}
         locationName={place.name}
-        features={features}
+        features={verifiableFeatures}
         isFullyVerified={isFullyVerified}
         onRequestReport={handleRequestReportFromFeature}
         refreshTrigger={verificationRefreshKey}
@@ -772,13 +956,13 @@ const styles = StyleSheet.create({
     borderColor: '#e2e8f0',
   },
   dragArea: {
-    height: 38,
+    height: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
   handleButton: {
     width: 100,
-    height: 38,
+    height: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -787,17 +971,6 @@ const styles = StyleSheet.create({
     height: 5,
     borderRadius: 3,
     backgroundColor: '#cbd5e1',
-  },
-  closeButton: {
-    position: 'absolute',
-    right: 12,
-    top: 6,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: '#f1f5f9',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   subviewViewport: {
     flex: 1,
@@ -823,64 +996,5 @@ const styles = StyleSheet.create({
   },
   sectionInset: {
     paddingHorizontal: 20,
-  },
-  verificationCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#F3FAF8',
-    borderWidth: 1,
-    borderColor: '#BFE7E0',
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 16,
-  },
-  verificationCardLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-    marginRight: 6,
-  },
-  verificationCardIconBox: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: '#E6F8F5',
-    borderWidth: 1,
-    borderColor: '#A8E7DC',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  verificationCardTextContainer: {
-    flex: 1,
-  },
-  verificationCardTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 2,
-  },
-  verificationCardTitle: {
-    fontSize: 13.5,
-    fontWeight: '800',
-    color: '#164E4A',
-  },
-  verificationBadge: {
-    backgroundColor: '#E6F8F5',
-    paddingHorizontal: 6,
-    paddingVertical: 1.5,
-    borderRadius: 6,
-  },
-  verificationBadgeText: {
-    fontSize: 10.5,
-    fontWeight: '800',
-    color: '#007D78',
-  },
-  verificationCardSub: {
-    fontSize: 11.5,
-    color: '#64748B',
-    lineHeight: 16,
   },
 });

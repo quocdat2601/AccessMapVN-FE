@@ -71,16 +71,21 @@ export async function loadSavedFavorites(syncWithServer = false): Promise<SavedF
   }
 
   try {
-    const serverItems = await apiClient.get<any[]>('/api/v1/users/me/favorites', {
-      auth: 'optional',
-    });
-    if (Array.isArray(serverItems) && serverItems.length > 0) {
+    let serverItems: any[] | null = null;
+    try {
+      const raw = await apiClient.get<any>('/api/v1/me/favorites', { auth: 'optional' });
+      serverItems = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : null;
+    } catch {
+      const legacy = await apiClient.get<any[]>('/api/v1/users/me/favorites', { auth: 'optional' });
+      serverItems = Array.isArray(legacy) ? legacy : null;
+    }
+    if (serverItems && serverItems.length > 0) {
       const byId = new Map<string, SavedFavoritePlace>();
       for (const item of localItems) {
         byId.set(item.id, item);
       }
       for (const s of serverItems) {
-        const id = String(s.id ?? '');
+        const id = String(s.locationId ?? s.id ?? '');
         if (!id) continue;
         if (!byId.has(id)) {
           byId.set(id, {
@@ -88,15 +93,15 @@ export async function loadSavedFavorites(syncWithServer = false): Promise<SavedF
             name: String(s.name ?? 'Địa điểm đã lưu'),
             category: String(s.category ?? 'other'),
             address: s.address ?? null,
-            lng: typeof s.lng === 'number' ? s.lng : undefined,
-            lat: typeof s.lat === 'number' ? s.lat : undefined,
+            lng: typeof (s.longitude ?? s.lng) === 'number' ? (s.longitude ?? s.lng) : undefined,
+            lat: typeof (s.latitude ?? s.lat) === 'number' ? (s.latitude ?? s.lat) : undefined,
             hasRamp: Boolean(s.hasRamp ?? s.has_ramp),
             hasAccessibleElevator: Boolean(s.hasAccessibleElevator ?? s.has_elevator),
             hasAccessibleRestroom: Boolean(s.hasAccessibleRestroom ?? s.has_accessible_restroom),
             hasTactilePaving: Boolean(s.hasTactilePaving ?? s.has_tactile_paving),
             doorWidthOk: Boolean(s.doorWidthOk ?? s.door_width_ok),
             accessibilityScore: typeof s.accessibilityScore === 'number' ? s.accessibilityScore : 0.85,
-            savedAt: new Date().toISOString(),
+            savedAt: String(s.createdAt ?? new Date().toISOString()),
           });
         }
       }
@@ -110,6 +115,19 @@ export async function loadSavedFavorites(syncWithServer = false): Promise<SavedF
   }
 
   return localItems;
+}
+
+async function syncFavoriteServer(placeId: string, exists: boolean, payload?: Record<string, unknown>) {
+  const encodedId = encodeURIComponent(placeId);
+  if (exists) {
+    await apiClient.delete(`/api/v1/me/favorites/${encodedId}`, { auth: 'optional' }).catch(() =>
+      apiClient.delete(`/api/v1/users/me/favorites/${encodedId}`, { auth: 'optional' })
+    );
+    return;
+  }
+  await apiClient.put(`/api/v1/me/favorites/${encodedId}`, undefined, { auth: 'optional' }).catch(() =>
+    apiClient.post(`/api/v1/users/me/favorites/${encodedId}`, payload, { auth: 'optional' })
+  );
 }
 
 export async function toggleSavedFavorite(
@@ -130,30 +148,19 @@ export async function toggleSavedFavorite(
   notify(next);
 
   if (isLoggedIn) {
-    const encodedId = encodeURIComponent(place.id);
-    if (exists) {
-      void apiClient.delete(`/api/v1/users/me/favorites/${encodedId}`, { auth: 'optional' }).catch(() => {});
-    } else {
-      void apiClient
-        .post(
-          `/api/v1/users/me/favorites/${encodedId}`,
-          {
-            name: place.name,
-            category: place.category,
-            address: place.address,
-            lng: place.lng,
-            lat: place.lat,
-            hasRamp: place.has_ramp,
-            hasAccessibleElevator: place.has_elevator || place.has_accessible_elevator,
-            hasTactilePaving: place.has_tactile_paving,
-            hasAccessibleRestroom: place.has_accessible_restroom,
-            doorWidthOk: place.door_width_ok,
-            accessibilityScore: place.accessibility_score,
-          },
-          { auth: 'optional' }
-        )
-        .catch(() => {});
-    }
+    void syncFavoriteServer(place.id, exists, {
+      name: place.name,
+      category: place.category,
+      address: place.address,
+      lng: place.lng,
+      lat: place.lat,
+      hasRamp: place.has_ramp,
+      hasAccessibleElevator: place.has_elevator || place.has_accessible_elevator,
+      hasTactilePaving: place.has_tactile_paving,
+      hasAccessibleRestroom: place.has_accessible_restroom,
+      doorWidthOk: place.door_width_ok,
+      accessibilityScore: place.accessibility_score,
+    }).catch(() => {});
   }
 
   return { isFavorite: !exists, items: next };
@@ -169,8 +176,7 @@ export async function removeSavedFavoriteById(
   notify(next);
 
   if (isLoggedIn) {
-    const encodedId = encodeURIComponent(placeId);
-    void apiClient.delete(`/api/v1/users/me/favorites/${encodedId}`, { auth: 'optional' }).catch(() => {});
+    void syncFavoriteServer(placeId, true).catch(() => {});
   }
 
   return next;

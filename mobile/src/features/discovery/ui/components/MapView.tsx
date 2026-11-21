@@ -138,8 +138,9 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const [activeTapPoint, setActiveTapPoint] = useState<{ lng: number; lat: number; name?: string } | null>(null);
 
   const flyToPlace = (lng: number, lat: number, zoom = 16) => {
-    // Center the map directly on the selected location coordinates for clear visibility
-    cameraRef.current?.flyTo({ center: [lng, lat], zoom, duration: 700 });
+    // Offset south so marker is centered in the visible viewport between search bar and bottom sheet
+    const targetLat = lat - 0.0011;
+    cameraRef.current?.flyTo({ center: [lng, targetLat], zoom, duration: 750 });
   };
 
   const handleClusterPress = (lng: number, lat: number) => {
@@ -268,10 +269,11 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         nativeEvent?.lngLat ||
         (nativeEvent?.coordinate ? [nativeEvent.coordinate.longitude, nativeEvent.coordinate.latitude] : null);
 
-      const immediateAddress = extractImmediateAddress(features || []);
+      const safeFeatures = features ?? [];
+      const immediateAddress = extractImmediateAddress(safeFeatures);
 
       // Priority 1: Check if user tapped directly on an AccessMapVN place marker feature
-      const appFeature = features.find(
+      const appFeature = safeFeatures.find(
         (f: any) => f?.properties?.id && places.some((p) => p.id === f.properties.id)
       );
       if (appFeature) {
@@ -296,6 +298,14 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         }
       }
 
+      const namedFeature = safeFeatures.find(
+        (f: any) =>
+          f?.properties?.name ||
+          f?.properties?.name_en ||
+          f?.properties?.name_vi ||
+          f?.properties?.['name:vi']
+      );
+
       // Priority 3: Check if user specifically tapped on their own location dot (only if NO place was closer)
       const userDistance =
         userLatitude != null && userLongitude != null && tapCoords
@@ -303,9 +313,10 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           : Infinity;
 
       const isUserLocationTap =
+        !namedFeature &&
         userLatitude != null &&
         userLongitude != null &&
-        (features.some((f: any) => f?.properties?.isUserLocation || (f?.layer?.id && f.layer.id === 'user-location-dot')) ||
+        (safeFeatures.some((f: any) => f?.properties?.isUserLocation || (f?.layer?.id && f.layer.id.includes('user-location'))) ||
           userDistance <= 14);
 
       if (isUserLocationTap && userLatitude != null && userLongitude != null) {
@@ -367,22 +378,12 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         return;
       }
 
-      if (!features || features.length === 0) {
+      if (safeFeatures.length === 0) {
         setActiveTapPoint(null);
         onSelectPlace?.(null);
         onSelectOsmPlace?.(null);
         return;
       }
-
-      // Priority 4: Check if tapped base map feature matches an existing loaded place
-      const namedFeature = features.find(
-        (f: any) =>
-          f?.properties?.name ||
-          f?.properties?.name_en ||
-          f?.properties?.name_vi ||
-          f?.properties?.['name:vi']
-      );
-
       if (namedFeature) {
         const props = namedFeature.properties;
         const rawName = props.name || props['name:vi'] || props.name_vi || props.name_en;
@@ -499,14 +500,28 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
   // Convert real lat/lng places into SVG LocationPoi coordinates for Expo Go / Web fallback
   const fallbackLocations = useMemo<LocationPoi[]>(() => {
+    if (places.length === 0) return [];
+
+    let minLng = Math.min(...places.map((p) => p.lng));
+    let maxLng = Math.max(...places.map((p) => p.lng));
+    let minLat = Math.min(...places.map((p) => p.lat));
+    let maxLat = Math.max(...places.map((p) => p.lat));
+
+    if (maxLng - minLng < 0.005) {
+      minLng -= 0.005;
+      maxLng += 0.005;
+    }
+    if (maxLat - minLat < 0.005) {
+      minLat -= 0.005;
+      maxLat += 0.005;
+    }
+
+    const lngSpan = maxLng - minLng;
+    const latSpan = maxLat - minLat;
+
     return places.map((p, idx) => {
-      // District 1 bounding approximation for SVG projection
-      const minLng = 106.692;
-      const maxLng = 106.710;
-      const minLat = 10.768;
-      const maxLat = 10.785;
-      const x = Math.max(15, Math.min(85, ((p.lng - minLng) / (maxLng - minLng)) * 100));
-      const y = Math.max(20, Math.min(80, (1 - (p.lat - minLat) / (maxLat - minLat)) * 100));
+      const x = Math.max(15, Math.min(85, ((p.lng - minLng) / lngSpan) * 70 + 15));
+      const y = Math.max(20, Math.min(80, (1 - (p.lat - minLat) / latSpan) * 60 + 20));
 
       return {
         id: p.id,
@@ -516,11 +531,11 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         yPercent: Number.isFinite(y) ? y : 40 + idx * 10,
         isSelected: p.id === selectedPlaceId,
         accessibility: {
-          hasRamp: p.has_ramp,
-          hasElevator: p.has_elevator,
-          hasTactilePaving: p.has_tactile_paving,
-          hasAccessibleRestroom: p.has_accessible_restroom,
-          doorWidthOk: p.door_width_ok,
+          hasRamp: p.has_ramp ?? undefined,
+          hasElevator: p.has_elevator ?? undefined,
+          hasTactilePaving: p.has_tactile_paving ?? undefined,
+          hasAccessibleRestroom: p.has_accessible_restroom ?? undefined,
+          doorWidthOk: p.door_width_ok ?? undefined,
           note: p.accessibility_note ?? undefined,
         },
       };

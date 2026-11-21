@@ -86,6 +86,10 @@ function categoryToSpriteIcon(category: string): string {
     case 'parking':
       return 'parking';
 
+    case 'charging_station':
+    case 'fuel':
+      return 'fuel_11';
+
     case 'hairdresser':
       return 'hairdresser';
 
@@ -95,8 +99,10 @@ function categoryToSpriteIcon(category: string): string {
     case 'apartment':
     case 'residential':
     case 'building':
+      return 'building_11';
+
     default:
-      return 'circle_stroked';
+      return 'marker_11';
   }
 }
 

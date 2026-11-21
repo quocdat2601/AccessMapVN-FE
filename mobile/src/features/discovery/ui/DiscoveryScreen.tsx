@@ -3,11 +3,14 @@ import { unifiedSearch, type GeocodeResult, type PlaceDto } from '@/entities/pla
 import { S901_CENTER } from '@/entities/place/model/mockS901Places';
 import { useAuth } from '@/features/auth';
 import {
+  fetchUserAccessibilityPreferences,
+  saveUserAccessibilityPreferences,
+} from '@/features/auth/model/AuthProvider';
+import {
   loadSavedFavorites,
   subscribeFavorites,
   toggleSavedFavorite,
 } from '@/features/auth/model/favoritesStorage';
-import { apiClient } from '@/shared/api/client';
 import { Colors } from '@/shared/theme';
 import { BottomNavBar } from '@/shared/ui/BottomNavBar';
 import { LoginRequiredModal } from '@/shared/ui/LoginRequiredModal';
@@ -115,12 +118,9 @@ export function DiscoveryScreen({
       if (!user) return;
 
       try {
-        const serverPrefs = await apiClient.get<Partial<AccessibilityFilterState>>(
-          '/api/v1/users/me/preferences',
-          { auth: 'optional' }
-        );
+        const serverPrefs = await fetchUserAccessibilityPreferences();
         if (active && serverPrefs && Object.keys(serverPrefs).length > 0) {
-          const merged = normalizeAccessibilityFilters(serverPrefs);
+          const merged = normalizeAccessibilityFilters(serverPrefs as Partial<AccessibilityFilterState>);
           setAccessibilityFilters(merged);
           void AsyncStorage.setItem('@accessmap_saved_preferences', JSON.stringify(merged));
         }
@@ -159,7 +159,7 @@ export function DiscoveryScreen({
         await AsyncStorage.setItem('@accessmap_saved_preferences', JSON.stringify(normalized));
         setAccessibilityFilters(normalized);
         if (user) {
-          await apiClient.put('/api/v1/users/me/preferences', normalized, { auth: 'optional' }).catch(() => { });
+          await saveUserAccessibilityPreferences(normalized as unknown as Record<string, unknown>);
         }
         Alert.alert(
           'Đã lưu hồ sơ tiếp cận',

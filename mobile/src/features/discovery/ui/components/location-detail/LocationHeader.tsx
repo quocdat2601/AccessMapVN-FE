@@ -1,7 +1,6 @@
-import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '@/shared/theme';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 interface LocationHeaderProps {
   name: string;
@@ -16,6 +15,7 @@ interface LocationHeaderProps {
   website?: string | null;
   isFavorite?: boolean;
   onToggleFavorite?: () => void;
+  onClose?: () => void;
 }
 
 export function LocationHeader({
@@ -31,28 +31,52 @@ export function LocationHeader({
   website,
   isFavorite = false,
   onToggleFavorite,
+  onClose,
 }: LocationHeaderProps) {
+  const hasCustomName = name && name.trim().length > 0 && name.trim().toLowerCase() !== address?.trim().toLowerCase();
+  const displayName = hasCustomName
+    ? name.trim()
+    : (address?.split(',').slice(0, 2).join(',').trim() || address || 'Vị trí khảo sát thực địa');
+
   return (
     <View style={styles.container}>
-      {/* Title & Bookmark Row */}
+      {/* Title & Action Buttons Row */}
       <View style={styles.titleRow}>
-        <Text style={styles.name} numberOfLines={2}>{name}</Text>
-        {onToggleFavorite && (
-          <TouchableOpacity
-            style={[styles.bookmarkButton, isFavorite && styles.bookmarkButtonActive]}
-            onPress={onToggleFavorite}
-            accessibilityRole="button"
-            accessibilityLabel={isFavorite ? 'Đã lưu yêu thích' : 'Lưu vào yêu thích'}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            activeOpacity={0.75}
-          >
-            <Ionicons
-              name={isFavorite ? 'bookmark' : 'bookmark-outline'}
-              size={20}
-              color={isFavorite ? '#004F58' : '#64748B'}
-            />
-          </TouchableOpacity>
-        )}
+        <Text style={styles.name} numberOfLines={2}>{displayName}</Text>
+        {(onToggleFavorite || onClose) ? (
+          <View style={styles.headerActions}>
+            {onToggleFavorite ? (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.bookmarkButton,
+                  isFavorite && styles.bookmarkButtonActive,
+                  pressed && styles.actionPressed,
+                ]}
+                onPress={onToggleFavorite}
+                accessibilityRole="button"
+                accessibilityLabel={isFavorite ? 'Đã lưu yêu thích' : 'Lưu vào yêu thích'}
+                hitSlop={4}
+              >
+                <Ionicons
+                  name={isFavorite ? 'bookmark' : 'bookmark-outline'}
+                  size={20}
+                  color={isFavorite ? '#004F58' : '#475569'}
+                />
+              </Pressable>
+            ) : null}
+            {onClose ? (
+              <Pressable
+                style={({ pressed }) => [styles.closeButton, pressed && styles.actionPressed]}
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel="Đóng thông tin địa điểm"
+                hitSlop={4}
+              >
+                <MaterialCommunityIcons name="close" size={20} color="#475569" />
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
       </View>
 
       {/* Meta Pills Row */}
@@ -74,9 +98,25 @@ export function LocationHeader({
           </View>
         ) : null}
         {standardLabel ? (
-          <View style={styles.standardBadge}>
-            <MaterialCommunityIcons name="check-decagram" size={13} color={Colors.primary} />
-            <Text style={styles.standardText}>{standardLabel}</Text>
+          <View
+            style={[
+              styles.standardBadge,
+              standardLabel !== 'Đối chiếu QCVN 10:2024' && styles.communityBadge,
+            ]}
+          >
+            <MaterialCommunityIcons
+              name={standardLabel === 'Đối chiếu QCVN 10:2024' ? 'check-decagram' : 'clipboard-text-outline'}
+              size={13}
+              color={standardLabel === 'Đối chiếu QCVN 10:2024' ? Colors.primary : '#B45309'}
+            />
+            <Text
+              style={[
+                styles.standardText,
+                standardLabel !== 'Đối chiếu QCVN 10:2024' && styles.communityText,
+              ]}
+            >
+              {standardLabel}
+            </Text>
           </View>
         ) : null}
       </View>
@@ -136,16 +176,33 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: -0.5,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexShrink: 0,
+  },
+  actionPressed: {
+    opacity: 0.78,
+  },
   bookmarkButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#F1F5F9',
     alignItems: 'center',
     justifyContent: 'center',
   },
   bookmarkButtonActive: {
     backgroundColor: '#CCFBF1',
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   metaRow: {
     marginTop: 8,
@@ -201,10 +258,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
+  communityBadge: {
+    backgroundColor: '#FEF3C7',
+  },
   standardText: {
     color: Colors.primary,
     fontSize: 11.5,
     fontWeight: '700',
+  },
+  communityText: {
+    color: '#B45309',
   },
   addressRow: {
     marginTop: 10,

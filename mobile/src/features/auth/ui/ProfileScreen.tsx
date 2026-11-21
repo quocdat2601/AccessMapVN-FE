@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   Platform,
+  Pressable,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -16,6 +17,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ContributionHistorySheet } from '@/entities/contribution';
 import { startContributionFlow } from '@/features/contribution';
 import {
   AccessibilityFilterModal,
@@ -24,9 +26,8 @@ import {
   normalizeAccessibilityFilters,
   type AccessibilityFilterState,
 } from '@/features/discovery/ui/components/AccessibilityFilterModal';
-import { apiClient } from '@/shared/api/client';
 import { BottomNavBar } from '@/shared/ui/BottomNavBar';
-import { useAuth } from '../model/AuthProvider';
+import { saveUserAccessibilityPreferences, useAuth } from '../model/AuthProvider';
 import { loadSavedFavorites, subscribeFavorites } from '../model/favoritesStorage';
 import { FavoritesModal } from './FavoritesModal';
 import { LeaderboardModal } from './LeaderboardModal';
@@ -52,6 +53,7 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
   const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showFavorites, setShowFavorites] = useState(false);
+  const [showContributionHistory, setShowContributionHistory] = useState(false);
   const [showAccessibilitySettings, setShowAccessibilitySettings] = useState(false);
   const [showProfileFilterModal, setShowProfileFilterModal] = useState(false);
   const [isSavingPrefs, setIsSavingPrefs] = useState(false);
@@ -99,7 +101,7 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
         await AsyncStorage.setItem('@accessmap_saved_preferences', JSON.stringify(normalized));
         setSavedFilters(normalized);
         if (user) {
-          await apiClient.put('/api/v1/users/me/preferences', normalized, { auth: 'optional' }).catch(() => {});
+          await saveUserAccessibilityPreferences(normalized as unknown as Record<string, unknown>);
         }
       } finally {
         setIsSavingPrefs(false);
@@ -371,6 +373,29 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
           <Ionicons name="chevron-forward" size={16} color="#64748B" />
         </TouchableOpacity>
 
+        {/* Đóng góp của tôi Card */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.card,
+            styles.favoriteCardRow,
+            pressed && styles.pressedCard,
+          ]}
+          onPress={() => setShowContributionHistory(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Đóng góp của tôi"
+        >
+          <View style={styles.mintSquareIcon}>
+            <MaterialCommunityIcons name="clipboard-text-clock-outline" size={19} color="#004F58" />
+          </View>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.cardTitle}>Đóng góp của tôi</Text>
+            <Text style={styles.favoriteSubText} numberOfLines={1}>
+              Xem trạng thái kiểm duyệt &amp; bổ sung minh chứng
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color="#64748B" />
+        </Pressable>
+
         {/* 3. Điểm thưởng & danh tiếng Card */}
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
@@ -593,6 +618,11 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
         visible={showFavorites}
         isGuest={isGuest}
         onClose={() => setShowFavorites(false)}
+      />
+
+      <ContributionHistorySheet
+        visible={showContributionHistory}
+        onClose={() => setShowContributionHistory(false)}
       />
 
       <AccessibilitySettingsModal
@@ -1119,5 +1149,8 @@ const styles = StyleSheet.create({
   footerLine2: {
     fontSize: 10.5,
     color: '#94A3B8',
+  },
+  pressedCard: {
+    opacity: 0.82,
   },
 });

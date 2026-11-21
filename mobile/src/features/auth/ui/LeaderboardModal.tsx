@@ -123,11 +123,30 @@ export function LeaderboardContent({ isGuest }: LeaderboardContentProps) {
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const lb = await apiClient.get<LeaderboardResponse>('/api/v1/leaderboard?limit=20', {
-        auth: 'none',
-      });
-      if (lb && Array.isArray(lb.items) && lb.items.length > 0) {
-        setLeaderboard(lb.items);
+      let rawLb: any = null;
+      try {
+        rawLb = await apiClient.get<any>('/api/v1/leaderboard', { auth: 'optional' });
+      } catch {
+        rawLb = await apiClient.get<any>('/api/v1/leaderboard?limit=20', { auth: 'none' });
+      }
+      const rawItems = Array.isArray(rawLb?.items)
+        ? rawLb.items
+        : Array.isArray(rawLb?.entries)
+        ? rawLb.entries
+        : null;
+      if (rawItems && rawItems.length > 0) {
+        setLeaderboard(
+          rawItems.map((entry: any) => ({
+            rank: Number(entry.rank ?? 0),
+            rankBadge: entry.rankBadge ?? null,
+            userId: String(entry.userId ?? `leader-${entry.rank ?? 0}`),
+            displayName: String(entry.displayName ?? 'Thành viên'),
+            reputationScore: Number(entry.reputationScore ?? entry.reputationPoints ?? 0),
+            reputationTier: String(entry.reputationTier ?? entry.rankBadge ?? 'Thành viên'),
+            expPoints: Number(entry.expPoints ?? entry.reputationPoints ?? 0),
+            contributionsCount: Number(entry.contributionsCount ?? 0),
+          }))
+        );
       } else {
         setLeaderboard(FALLBACK_LEADERBOARD);
       }
@@ -137,9 +156,32 @@ export function LeaderboardContent({ isGuest }: LeaderboardContentProps) {
 
     if (!isGuest) {
       try {
-        const rep = await apiClient.get<MyReputationResponse>('/api/v1/users/me/reputation', {
-          auth: 'optional',
-        });
+        let rep: any = null;
+        try {
+          const ownerRep = await apiClient.get<any>('/api/v1/me/reputation', { auth: 'optional' });
+          if (ownerRep && typeof ownerRep.reputationPoints === 'number') {
+            rep = {
+              reputationScore: ownerRep.reputationPoints,
+              reputationTier: ownerRep.rankLabel || ownerRep.rankBadge || 'Thành viên mới',
+              trustWeight: ownerRep.reputationPoints >= 50 ? 1.5 : 1.0,
+              rank: null,
+              expPoints: ownerRep.reputationPoints,
+              contributionsCount: Number(ownerRep.correctClaimCount ?? 0) + Number(ownerRep.incorrectClaimCount ?? 0),
+              recentEvents: Array.isArray(ownerRep.history)
+                ? ownerRep.history.map((h: any) => ({
+                    delta: Number(h.appliedDelta ?? 0),
+                    newScore: Number(h.balanceAfter ?? 0),
+                    reason: String(h.sourceType ?? h.sourceOutcome ?? 'Cập nhật uy tín'),
+                    occurredAt: String(h.appliedAt ?? ''),
+                  }))
+                : [],
+            } satisfies MyReputationResponse;
+          }
+        } catch {
+          rep = await apiClient.get<MyReputationResponse>('/api/v1/users/me/reputation', {
+            auth: 'optional',
+          });
+        }
         if (rep && typeof rep.reputationScore === 'number') {
           setMyRep(rep);
         } else {

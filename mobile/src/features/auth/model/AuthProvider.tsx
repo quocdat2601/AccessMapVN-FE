@@ -59,6 +59,104 @@ interface BackendProfileResponse {
   reportsCount: number;
 }
 
+const VALID_BACKEND_PROFILES = new Set(['wheelchair', 'limited_mobility', 'elderly', 'stroller']);
+
+function featureCriterionToFeatureType(key: string): string | null {
+  switch (key) {
+    case 'ramp':
+      return 'Ramp';
+    case 'wideEntrance':
+      return 'EntranceDoor';
+    case 'elevatorMode':
+      return 'Elevator';
+    case 'restroomMode':
+      return 'AccessibleRestroom';
+    default:
+      return null;
+  }
+}
+
+function featureTypeToCriterionKey(featureType: unknown): string | null {
+  switch (String(featureType ?? '').toLowerCase()) {
+    case 'ramp':
+    case '1':
+      return 'ramp';
+    case 'entrancedoor':
+    case '5':
+      return 'wideEntrance';
+    case 'elevator':
+    case '2':
+      return 'elevatorMode';
+    case 'accessiblerestroom':
+    case '3':
+      return 'restroomMode';
+    default:
+      return null;
+  }
+}
+
+function toBackendPreferencePayload(filters: Record<string, unknown>) {
+  const preset = String(filters.preset ?? '');
+  const mobilityProfile = VALID_BACKEND_PROFILES.has(preset) ? preset : 'limited_mobility';
+  const defaultRequiredFeatures: Array<{ featureType: string; desiredStatus: string }> = [];
+  const defaultPreferredFeatures: Array<{ featureType: string; desiredStatus: string }> = [];
+
+  for (const [key, level] of Object.entries(filters)) {
+    const featureType = featureCriterionToFeatureType(key);
+    if (!featureType) continue;
+    if (level === 'required') defaultRequiredFeatures.push({ featureType, desiredStatus: 'Available' });
+    else if (level === 'preferred') defaultPreferredFeatures.push({ featureType, desiredStatus: 'Available' });
+  }
+
+  return {
+    mobilityProfile,
+    defaultRequiredFeatures,
+    defaultPreferredFeatures,
+    consent: true,
+    expectedVersion: null,
+  };
+}
+
+function fromBackendPreferenceView(raw: any): Record<string, unknown> | null {
+  if (!raw || typeof raw !== 'object') return null;
+  if (!('mobilityProfile' in raw) && !('defaultRequiredFeatures' in raw)) {
+    return raw as Record<string, unknown>;
+  }
+  const mapped: Record<string, unknown> = {
+    preset: VALID_BACKEND_PROFILES.has(String(raw.mobilityProfile)) ? raw.mobilityProfile : 'custom',
+  };
+  for (const item of Array.isArray(raw.defaultRequiredFeatures) ? raw.defaultRequiredFeatures : []) {
+    const key = featureTypeToCriterionKey(item?.featureType);
+    if (key) mapped[key] = 'required';
+  }
+  for (const item of Array.isArray(raw.defaultPreferredFeatures) ? raw.defaultPreferredFeatures : []) {
+    const key = featureTypeToCriterionKey(item?.featureType);
+    if (key && !mapped[key]) mapped[key] = 'preferred';
+  }
+  return mapped;
+}
+
+export async function fetchUserAccessibilityPreferences(): Promise<Record<string, unknown> | null> {
+  try {
+    const raw = await apiClient.get<any>('/api/v1/me/accessibility-preference', { auth: 'optional' });
+    return fromBackendPreferenceView(raw);
+  } catch {
+    return await apiClient.get<Record<string, unknown>>('/api/v1/users/me/preferences', {
+      auth: 'optional',
+    });
+  }
+}
+
+export async function saveUserAccessibilityPreferences(filters: Record<string, unknown>): Promise<void> {
+  try {
+    await apiClient.put('/api/v1/me/accessibility-preference', toBackendPreferencePayload(filters), {
+      auth: 'optional',
+    });
+  } catch {
+    await apiClient.put('/api/v1/users/me/preferences', filters, { auth: 'optional' }).catch(() => {});
+  }
+}
+
 const DEFAULT_PROFILE_STATS = {
   expPoints: 0,
   reputationScore: 0,
@@ -79,6 +177,27 @@ export function AuthProvider({ children }: PropsWithChildren) {
     }
 
     try {
+      try {
+        await apiClient.get<any>('/api/v1/me', { auth: 'required' });
+        const rep = await apiClient
+          .get<any>('/api/v1/me/reputation', { auth: 'required' })
+          .catch(() => null);
+        if (rep && typeof rep.reputationPoints === 'number') {
+          setProfileStats({
+            expPoints: rep.reputationPoints ?? 0,
+            reputationScore: rep.reputationPoints ?? 0,
+            reputationTier: rep.rankLabel || rep.rankBadge || 'Thành viên mới',
+            contributionsCount: Number(rep.correctClaimCount ?? 0) + Number(rep.incorrectClaimCount ?? 0),
+            reportsCount: 0,
+          });
+        } else {
+          setProfileStats(DEFAULT_PROFILE_STATS);
+        }
+        return;
+      } catch {
+        // Fallback to legacy monorepo backend profile endpoint
+      }
+
       const data = await apiClient.get<BackendProfileResponse>('/api/v1/users/me/profile', {
         auth: 'required',
       });
