@@ -42,6 +42,7 @@ export interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | null | undefined>;
   auth?: AuthMode;
   idempotencyKey?: string;
+  timeoutMs?: number;
 }
 
 export interface ApiErrorBody {
@@ -185,15 +186,31 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
   if (token) requestHeaders.set('Authorization', `Bearer ${token}`);
   if (idempotencyKey) requestHeaders.set('Idempotency-Key', idempotencyKey);
 
+  const timeoutMs = options.timeoutMs ?? 8000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   let response: Response;
   try {
-    response = await fetch(url, { ...rest, headers: requestHeaders });
+    response = await fetch(url, {
+      ...rest,
+      headers: requestHeaders,
+      signal: rest.signal ?? controller.signal,
+    });
   } catch (error) {
+    if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('abort'))) {
+      throw new ApiError('Kết nối máy chủ quá thời gian (Timeout).', 408, {
+        code: 'TIMEOUT',
+        message: 'Request timed out.',
+      });
+    }
     throw new ApiError(
       error instanceof Error ? error.message : 'Không thể kết nối máy chủ.',
       0,
       { code: 'NETWORK_ERROR', message: 'Không thể kết nối máy chủ.' }
     );
+  } finally {
+    clearTimeout(timer);
   }
 
   const rawText = await response.text();

@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
+  Animated,
   Modal,
   Platform,
+  RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -11,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { apiClient } from '@/shared/api/client';
 import { Colors } from '@/shared/theme';
@@ -25,11 +27,6 @@ export interface LeaderboardEntry {
   reputationTier: string;
   expPoints: number;
   contributionsCount: number;
-}
-
-interface LeaderboardResponse {
-  items: LeaderboardEntry[];
-  totalContributors: number;
 }
 
 interface MyReputationResponse {
@@ -48,126 +45,395 @@ interface MyReputationResponse {
   }[];
 }
 
-const FALLBACK_LEADERBOARD: LeaderboardEntry[] = [
+export const FALLBACK_LEADERBOARD: LeaderboardEntry[] = [
   {
     rank: 1,
-    rankBadge: 'Top 1',
+    rankBadge: 'Quán Quân',
     userId: 'demo-user-1',
     displayName: 'Nguyễn Minh Anh',
-    reputationScore: 145,
-    reputationTier: 'Hạng Vàng',
-    expPoints: 950,
-    contributionsCount: 29,
+    reputationScore: 285,
+    reputationTier: 'Kiểm định viên Ưu tú',
+    expPoints: 1850,
+    contributionsCount: 42,
   },
   {
     rank: 2,
-    rankBadge: 'Top 2',
+    rankBadge: 'Á Quân 1',
     userId: 'demo-user-2',
     displayName: 'Trần Quốc Đạt',
-    reputationScore: 110,
+    reputationScore: 220,
     reputationTier: 'Hạng Vàng',
-    expPoints: 720,
-    contributionsCount: 22,
+    expPoints: 1420,
+    contributionsCount: 35,
   },
   {
     rank: 3,
-    rankBadge: 'Top 3',
+    rankBadge: 'Á Quân 2',
     userId: 'demo-user-3',
     displayName: 'Lê Hoàng Nam',
-    reputationScore: 78,
-    reputationTier: 'Trusted',
-    expPoints: 540,
-    contributionsCount: 16,
+    reputationScore: 175,
+    reputationTier: 'Hạng Bạc',
+    expPoints: 1100,
+    contributionsCount: 28,
   },
   {
     rank: 4,
     rankBadge: 'Top 10',
     userId: 'demo-user-4',
     displayName: 'Phạm Thu Hà',
-    reputationScore: 62,
-    reputationTier: 'Trusted',
-    expPoints: 410,
-    contributionsCount: 13,
+    reputationScore: 135,
+    reputationTier: 'Người đóng góp Tích cực',
+    expPoints: 890,
+    contributionsCount: 21,
   },
   {
     rank: 5,
     rankBadge: 'Top 10',
     userId: 'demo-user-5',
     displayName: 'Võ Thanh Tùng',
-    reputationScore: 45,
+    reputationScore: 98,
     reputationTier: 'Hạng Đồng',
-    expPoints: 320,
-    contributionsCount: 9,
+    expPoints: 640,
+    contributionsCount: 17,
   },
   {
     rank: 6,
     rankBadge: 'Top 10',
     userId: 'demo-user-6',
     displayName: 'Đặng Ngọc Linh',
-    reputationScore: 30,
+    reputationScore: 74,
     reputationTier: 'Hạng Đồng',
-    expPoints: 210,
-    contributionsCount: 6,
+    expPoints: 490,
+    contributionsCount: 13,
+  },
+  {
+    rank: 7,
+    rankBadge: 'Top 10',
+    userId: 'demo-user-7',
+    displayName: 'Hoàng Văn Khôi',
+    reputationScore: 56,
+    reputationTier: 'Thành viên Tích cực',
+    expPoints: 370,
+    contributionsCount: 10,
+  },
+  {
+    rank: 8,
+    rankBadge: 'Top 10',
+    userId: 'demo-user-8',
+    displayName: 'Bùi Thị Mai',
+    reputationScore: 42,
+    reputationTier: 'Thành viên Mới',
+    expPoints: 280,
+    contributionsCount: 7,
+  },
+  {
+    rank: 9,
+    rankBadge: 'Top 10',
+    userId: 'demo-user-9',
+    displayName: 'Đỗ Anh Đức',
+    reputationScore: 35,
+    reputationTier: 'Thành viên Mới',
+    expPoints: 230,
+    contributionsCount: 5,
+  },
+  {
+    rank: 10,
+    rankBadge: 'Top 10',
+    userId: 'demo-user-10',
+    displayName: 'Phan Khánh Huyền',
+    reputationScore: 28,
+    reputationTier: 'Thành viên Mới',
+    expPoints: 190,
+    contributionsCount: 4,
   },
 ];
 
-interface LeaderboardContentProps {
-  isGuest: boolean;
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 0) return 'TV';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  const first = parts[0][0];
+  const last = parts[parts.length - 1][0];
+  return `${first}${last}`.toUpperCase();
 }
 
-export function LeaderboardContent({ isGuest }: LeaderboardContentProps) {
+/**
+ * Animated Skeleton Shimmer Placeholder
+ */
+function LeaderboardSkeleton() {
+  const pulseAnim = useRef(new Animated.Value(0.35)).current;
+
+  useEffect(() => {
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 0.85,
+          duration: 750,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 0.35,
+          duration: 750,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [pulseAnim]);
+
+  return (
+    <View style={styles.skeletonContainer}>
+      {/* Policy Card Skeleton */}
+      <Animated.View style={[styles.skeletonPolicyCard, { opacity: pulseAnim }]} />
+
+      {/* Podium Skeleton */}
+      <View style={styles.skeletonPodiumWrapper}>
+        <Animated.View style={[styles.skeletonPodiumCol, { height: 160, opacity: pulseAnim }]} />
+        <Animated.View style={[styles.skeletonPodiumCol, { height: 190, opacity: pulseAnim }]} />
+        <Animated.View style={[styles.skeletonPodiumCol, { height: 145, opacity: pulseAnim }]} />
+      </View>
+
+      {/* List Row Skeletons */}
+      {[1, 2, 3, 4].map((key) => (
+        <Animated.View key={key} style={[styles.skeletonRow, { opacity: pulseAnim }]} />
+      ))}
+    </View>
+  );
+}
+
+/**
+ * Empty State Component with Call-To-Action
+ */
+interface LeaderboardEmptyStateProps {
+  onStartContribution?: () => void;
+}
+
+function LeaderboardEmptyState({ onStartContribution }: LeaderboardEmptyStateProps) {
+  return (
+    <View style={styles.emptyContainer}>
+      <View style={styles.emptyIconCircle}>
+        <MaterialCommunityIcons name="trophy-outline" size={48} color="#006874" />
+      </View>
+      <Text style={styles.emptyTitle}>Chưa có dữ liệu bảng xếp hạng</Text>
+      <Text style={styles.emptySubtitle}>
+        Hãy là người tiên phong khảo sát tiếp cận và đóng góp vị trí để vinh danh trên bục vàng uy tín cộng đồng!
+      </Text>
+      {onStartContribution && (
+        <TouchableOpacity
+          style={styles.emptyActionBtn}
+          onPress={onStartContribution}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="add-circle" size={18} color="#FFFFFF" />
+          <Text style={styles.emptyActionBtnText}>Bắt đầu đóng góp ngay</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+/**
+ * Top 3 Podium Component
+ */
+interface LeaderboardPodiumProps {
+  top3: LeaderboardEntry[];
+}
+
+function LeaderboardPodium({ top3 }: LeaderboardPodiumProps) {
+  if (top3.length === 0) return null;
+
+  const rank1 = top3.find((item) => item.rank === 1) || top3[0];
+  const rank2 = top3.find((item) => item.rank === 2) || (top3.length > 1 ? top3[1] : null);
+  const rank3 = top3.find((item) => item.rank === 3) || (top3.length > 2 ? top3[2] : null);
+
+  return (
+    <View style={styles.podiumContainer}>
+      <View style={styles.podiumHeaderBadge}>
+        <MaterialCommunityIcons name="crown" size={16} color="#D97706" />
+        <Text style={styles.podiumHeaderText}>VINH DANH TOP 3 XUẤT SẮC</Text>
+      </View>
+
+      <View style={styles.podiumRow}>
+        {/* RANK 2 - SILVER (LEFT) */}
+        {rank2 ? (
+          <View style={styles.podiumColumn}>
+            <View style={styles.avatarWrapper}>
+              <View style={[styles.avatarCircle, styles.silverAvatar]}>
+                <Text style={styles.avatarInitials}>{getInitials(rank2.displayName)}</Text>
+              </View>
+              <View style={[styles.podiumMedalBadge, styles.silverMedal]}>
+                <MaterialCommunityIcons name="medal" size={12} color="#475569" />
+                <Text style={styles.silverMedalText}>2</Text>
+              </View>
+            </View>
+            <Text style={styles.podiumName} numberOfLines={1}>{rank2.displayName}</Text>
+            <View style={[styles.podiumScorePill, styles.silverScorePill]}>
+              <Text style={styles.silverScoreText}>{rank2.reputationScore}</Text>
+              <Text style={styles.podiumScoreLabel}>uy tín</Text>
+            </View>
+            <Text style={styles.podiumSubText}>{rank2.contributionsCount} đóng góp</Text>
+            {/* Step Base */}
+            <View style={[styles.stepBase, styles.silverStep]}>
+              <Text style={styles.silverStepNum}>2</Text>
+              <Text style={styles.stepTitle}>Á Quân 1</Text>
+            </View>
+          </View>
+        ) : (
+          <View style={[styles.podiumColumn, { opacity: 0.3 }]} />
+        )}
+
+        {/* RANK 1 - GOLD (CENTER, ELEVATED) */}
+        {rank1 && (
+          <View style={[styles.podiumColumn, styles.goldColumn]}>
+            <View style={styles.crownFloating}>
+              <MaterialCommunityIcons name="crown" size={24} color="#D97706" />
+            </View>
+            <View style={styles.avatarWrapper}>
+              <View style={[styles.avatarCircle, styles.goldAvatar]}>
+                <Text style={[styles.avatarInitials, styles.goldInitials]}>
+                  {getInitials(rank1.displayName)}
+                </Text>
+              </View>
+              <View style={[styles.podiumMedalBadge, styles.goldMedal]}>
+                <MaterialCommunityIcons name="trophy" size={14} color="#B45309" />
+                <Text style={styles.goldMedalText}>1</Text>
+              </View>
+            </View>
+            <Text style={[styles.podiumName, styles.goldName]} numberOfLines={1}>
+              {rank1.displayName}
+            </Text>
+            <View style={[styles.podiumScorePill, styles.goldScorePill]}>
+              <Text style={styles.goldScoreText}>{rank1.reputationScore}</Text>
+              <Text style={styles.goldScoreLabel}>uy tín</Text>
+            </View>
+            <Text style={[styles.podiumSubText, styles.goldSubText]}>
+              {rank1.contributionsCount} đóng góp · {rank1.expPoints} EXP
+            </Text>
+            {/* Step Base */}
+            <View style={[styles.stepBase, styles.goldStep]}>
+              <Text style={styles.goldStepNum}>1</Text>
+              <Text style={styles.goldStepTitle}>Quán Quân</Text>
+            </View>
+          </View>
+        )}
+
+        {/* RANK 3 - BRONZE (RIGHT) */}
+        {rank3 ? (
+          <View style={styles.podiumColumn}>
+            <View style={styles.avatarWrapper}>
+              <View style={[styles.avatarCircle, styles.bronzeAvatar]}>
+                <Text style={styles.avatarInitials}>{getInitials(rank3.displayName)}</Text>
+              </View>
+              <View style={[styles.podiumMedalBadge, styles.bronzeMedal]}>
+                <MaterialCommunityIcons name="medal" size={12} color="#C2410C" />
+                <Text style={styles.bronzeMedalText}>3</Text>
+              </View>
+            </View>
+            <Text style={styles.podiumName} numberOfLines={1}>{rank3.displayName}</Text>
+            <View style={[styles.podiumScorePill, styles.bronzeScorePill]}>
+              <Text style={styles.bronzeScoreText}>{rank3.reputationScore}</Text>
+              <Text style={styles.podiumScoreLabel}>uy tín</Text>
+            </View>
+            <Text style={styles.podiumSubText}>{rank3.contributionsCount} đóng góp</Text>
+            {/* Step Base */}
+            <View style={[styles.stepBase, styles.bronzeStep]}>
+              <Text style={styles.bronzeStepNum}>3</Text>
+              <Text style={styles.stepTitle}>Á Quân 2</Text>
+            </View>
+          </View>
+        ) : (
+          <View style={[styles.podiumColumn, { opacity: 0.3 }]} />
+        )}
+      </View>
+    </View>
+  );
+}
+
+export interface LeaderboardContentProps {
+  isGuest: boolean;
+  onStartContribution?: () => void;
+}
+
+export function LeaderboardContent({ isGuest, onStartContribution }: LeaderboardContentProps) {
+  const router = useRouter();
   const { userProfile } = useAuth();
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(FALLBACK_LEADERBOARD);
   const [myRep, setMyRep] = useState<MyReputationResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      let rawLb: any = null;
+  const handleStartContribution = useCallback(() => {
+    if (onStartContribution) {
+      onStartContribution();
+    } else {
       try {
-        rawLb = await apiClient.get<any>('/api/v1/leaderboard', { auth: 'optional' });
+        router.push('/' as any);
       } catch {
-        rawLb = await apiClient.get<any>('/api/v1/leaderboard?limit=20', { auth: 'none' });
+        // Safe fallback
       }
-      const rawItems = Array.isArray(rawLb?.items)
-        ? rawLb.items
-        : Array.isArray(rawLb?.entries)
-        ? rawLb.entries
-        : null;
-      if (rawItems && rawItems.length > 0) {
-        setLeaderboard(
-          rawItems.map((entry: any) => ({
-            rank: Number(entry.rank ?? 0),
-            rankBadge: entry.rankBadge ?? null,
-            userId: String(entry.userId ?? `leader-${entry.rank ?? 0}`),
-            displayName: String(entry.displayName ?? 'Thành viên'),
-            reputationScore: Number(entry.reputationScore ?? entry.reputationPoints ?? 0),
-            reputationTier: String(entry.reputationTier ?? entry.rankBadge ?? 'Thành viên'),
-            expPoints: Number(entry.expPoints ?? entry.reputationPoints ?? 0),
-            contributionsCount: Number(entry.contributionsCount ?? 0),
-          }))
-        );
-      } else {
-        setLeaderboard(FALLBACK_LEADERBOARD);
-      }
-    } catch {
-      setLeaderboard(FALLBACK_LEADERBOARD);
+    }
+  }, [onStartContribution, router]);
+
+  const loadData = useCallback(async (isPullToRefresh = false) => {
+    if (isPullToRefresh) {
+      setIsRefreshing(true);
+    } else {
+      setIsLoading(true);
     }
 
-    if (!isGuest) {
-      try {
-        let rep: any = null;
-        try {
-          const ownerRep = await apiClient.get<any>('/api/v1/me/reputation', { auth: 'optional' });
-          if (ownerRep && typeof ownerRep.reputationPoints === 'number') {
-            rep = {
-              reputationScore: ownerRep.reputationPoints,
-              reputationTier: ownerRep.rankLabel || ownerRep.rankBadge || 'Thành viên mới',
-              trustWeight: ownerRep.reputationPoints >= 50 ? 1.5 : 1.0,
-              rank: null,
-              expPoints: ownerRep.reputationPoints,
-              contributionsCount: Number(ownerRep.correctClaimCount ?? 0) + Number(ownerRep.incorrectClaimCount ?? 0),
+    try {
+      // Parallel fetch with fast timeout to avoid hanging UI
+      const [lbResult, repResult] = await Promise.allSettled([
+        apiClient.get<any>('/api/v1/leaderboard', { auth: 'optional', timeoutMs: 3500 }),
+        !isGuest
+          ? apiClient.get<any>('/api/v1/me/reputation', { auth: 'optional', timeoutMs: 3500 })
+          : Promise.resolve(null),
+      ]);
+
+      // Process Leaderboard
+      if (lbResult.status === 'fulfilled' && lbResult.value) {
+        const rawLb = lbResult.value;
+        const rawItems = Array.isArray(rawLb?.items)
+          ? rawLb.items
+          : Array.isArray(rawLb?.entries)
+          ? rawLb.entries
+          : null;
+
+        if (rawItems && rawItems.length > 0) {
+          setLeaderboard(
+            rawItems.map((entry: any, index: number) => ({
+              rank: Number(entry.rank ?? index + 1),
+              rankBadge: entry.rankBadge ?? (index === 0 ? 'Quán Quân' : index === 1 ? 'Á Quân 1' : index === 2 ? 'Á Quân 2' : 'Top 10'),
+              userId: String(entry.userId ?? `leader-${index + 1}`),
+              displayName: String(entry.displayName ?? 'Thành viên'),
+              reputationScore: Number(entry.reputationScore ?? entry.reputationPoints ?? 0),
+              reputationTier: String(entry.reputationTier ?? entry.rankBadge ?? 'Thành viên'),
+              expPoints: Number(entry.expPoints ?? entry.reputationPoints ?? 0),
+              contributionsCount: Number(entry.contributionsCount ?? 0),
+            }))
+          );
+        } else {
+          setLeaderboard(FALLBACK_LEADERBOARD);
+        }
+      } else {
+        // Fallback to rich mock data
+        setLeaderboard(FALLBACK_LEADERBOARD);
+      }
+
+      // Process Reputation
+      if (!isGuest) {
+        if (repResult.status === 'fulfilled' && repResult.value) {
+          const ownerRep = repResult.value;
+          if (typeof ownerRep?.reputationPoints === 'number' || typeof ownerRep?.reputationScore === 'number') {
+            const score = ownerRep.reputationPoints ?? ownerRep.reputationScore;
+            setMyRep({
+              reputationScore: score,
+              reputationTier: ownerRep.rankLabel || ownerRep.rankBadge || ownerRep.reputationTier || 'Thành viên mới',
+              trustWeight: score >= 50 ? 1.5 : 1.0,
+              rank: ownerRep.rank ?? null,
+              expPoints: ownerRep.expPoints ?? score,
+              contributionsCount: Number(ownerRep.correctClaimCount ?? ownerRep.contributionsCount ?? 0),
               recentEvents: Array.isArray(ownerRep.history)
                 ? ownerRep.history.map((h: any) => ({
                     scoreType: String(h.scoreType ?? 'ReputationPoints'),
@@ -177,42 +443,57 @@ export function LeaderboardContent({ isGuest }: LeaderboardContentProps) {
                     occurredAt: String(h.appliedAt ?? ''),
                   }))
                 : [],
-            } satisfies MyReputationResponse;
+            });
+          } else {
+            throw new Error('use fallback reputation');
           }
-        } catch {
-          rep = await apiClient.get<MyReputationResponse>('/api/v1/users/me/reputation', {
-            auth: 'optional',
-          });
-        }
-        if (rep && typeof rep.reputationScore === 'number') {
-          setMyRep(rep);
         } else {
-          throw new Error('use fallback');
+          throw new Error('fetch reputation failed');
         }
-      } catch {
-        const fallbackScore = Math.max(userProfile.contributionsCount * 5, 35);
+      } else {
+        setMyRep(null);
+      }
+    } catch {
+      // In case of error/guest, provide a realistic personal fallback stats
+      if (!isGuest) {
+        const fallbackScore = Math.max((userProfile.contributionsCount || 0) * 5, 45);
         setMyRep({
           reputationScore: fallbackScore,
           reputationTier: userProfile.reputationTier || 'Người kiểm định Cấp 3',
           trustWeight: fallbackScore >= 50 ? 1.5 : 1.0,
-          rank: 3,
-          expPoints: userProfile.expPoints || 350,
+          rank: 2,
+          expPoints: userProfile.expPoints || 450,
           contributionsCount: userProfile.contributionsCount || 18,
           recentEvents: [],
         });
       }
-    } else {
-      setMyRep(null);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
     }
-    setIsLoading(false);
   }, [isGuest, userProfile.contributionsCount, userProfile.expPoints, userProfile.reputationTier]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
 
+  const top3 = leaderboard.slice(0, 3);
+  const remainingRanks = leaderboard.slice(3);
+
   return (
-    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={isRefreshing}
+          onRefresh={() => void loadData(true)}
+          colors={[Colors.primary]}
+          tintColor={Colors.primary}
+        />
+      }
+    >
+      {/* Policy Card Banner */}
       <View style={styles.policyCard}>
         <View style={styles.policyHeaderRow}>
           <MaterialCommunityIcons name="shield-star-outline" size={18} color="#006874" />
@@ -220,122 +501,118 @@ export function LeaderboardContent({ isGuest }: LeaderboardContentProps) {
         </View>
         <Text style={styles.policyLine}>• +5 điểm uy tín: Đóng góp địa điểm tiếp cận mới được công bố.</Text>
         <Text style={styles.policyLine}>• +2 điểm uy tín: Bổ sung tiện ích mới tại địa điểm sau 30 ngày.</Text>
-        <Text style={styles.policyLine}>• Hệ số tin cậy 1.5x khi đạt từ 50 điểm uy tín (Trusted).</Text>
+        <Text style={styles.policyLine}>• Hệ số tin cậy 1.5x khi đạt từ 50 điểm uy tín (Trusted Member).</Text>
       </View>
 
+      {/* Personal Rank Card */}
       {!isGuest && myRep && (
         <View style={styles.mySummaryCard}>
-          <Text style={styles.mySummaryLabel}>THỨ HẠNG CÁ NHÂN CỦA BẠN</Text>
+          <View style={styles.mySummaryHeaderRow}>
+            <Text style={styles.mySummaryLabel}>THỨ HẠNG CÁ NHÂN CỦA BẠN</Text>
+            <View style={styles.tierPill}>
+              <Ionicons name="sparkles" size={11} color="#006874" />
+              <Text style={styles.tierPillText}>{myRep.reputationTier}</Text>
+            </View>
+          </View>
           <View style={styles.mySummaryRow}>
             <View style={styles.myStat}>
-              <Text style={styles.myStatValue}>{myRep.rank ? `#${myRep.rank}` : '#3'}</Text>
+              <Text style={styles.myStatValue}>{myRep.rank ? `#${myRep.rank}` : '#2'}</Text>
               <Text style={styles.myStatSub}>Xếp hạng</Text>
             </View>
+            <View style={styles.myStatDivider} />
             <View style={styles.myStat}>
-              <Text style={styles.myStatValue}>{myRep.reputationScore}</Text>
+              <Text style={[styles.myStatValue, { color: '#006874' }]}>{myRep.reputationScore}</Text>
               <Text style={styles.myStatSub}>Điểm uy tín</Text>
             </View>
+            <View style={styles.myStatDivider} />
             <View style={styles.myStat}>
               <Text style={styles.myStatValue}>{myRep.trustWeight}x</Text>
-              <Text style={styles.myStatSub}>{myRep.reputationTier}</Text>
+              <Text style={styles.myStatSub}>Hệ số tin cậy</Text>
+            </View>
+            <View style={styles.myStatDivider} />
+            <View style={styles.myStat}>
+              <Text style={styles.myStatValue}>{myRep.contributionsCount}</Text>
+              <Text style={styles.myStatSub}>Đóng góp</Text>
             </View>
           </View>
         </View>
       )}
 
-      {!isGuest && myRep && myRep.recentEvents.length > 0 && (
-        <View style={styles.mySummaryCard}>
-          <Text style={styles.mySummaryLabel}>LỊCH SỬ BIẾN ĐỘNG ĐIỂM & UY TÍN (WF-04)</Text>
-          <View style={{ gap: 8 }}>
-            {myRep.recentEvents.slice(0, 5).map((ev, index) => {
-              const isStanding = ev.scoreType === 'AccountStandingScore';
-              const formattedDate = ev.occurredAt
-                ? new Date(ev.occurredAt).toLocaleString('vi-VN')
-                : 'Gần đây';
-              const deltaText = ev.delta >= 0 ? `+${ev.delta}` : `${ev.delta}`;
-              return (
-                <View
-                  key={`${ev.occurredAt}-${ev.reason}-${index}`}
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    borderTopWidth: index === 0 ? 0 : 1,
-                    borderTopColor: '#F1F5F9',
-                    paddingTop: index === 0 ? 0 : 8,
-                    gap: 8,
-                  }}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#0F172A' }}>
-                      {ev.reason}
-                    </Text>
-                    <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
-                      {isStanding ? 'Điểm chấp hành' : 'Điểm uy tín'} · {formattedDate}
-                    </Text>
-                  </View>
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text
-                      style={{
-                        fontSize: 13.5,
-                        fontWeight: '800',
-                        color: ev.delta >= 0 ? '#059669' : '#DC2626',
-                      }}
-                    >
-                      {deltaText}
-                    </Text>
-                    <Text style={{ fontSize: 11, color: '#475569' }}>Mức mới: {ev.newScore}</Text>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        </View>
-      )}
-
+      {/* Loading Skeleton State */}
       {isLoading ? (
-        <View style={styles.centered}>
-          <ActivityIndicator size="large" color={Colors.primary} />
-        </View>
+        <LeaderboardSkeleton />
+      ) : leaderboard.length === 0 ? (
+        /* Empty State */
+        <LeaderboardEmptyState onStartContribution={handleStartContribution} />
       ) : (
-        <View style={styles.list}>
-          {leaderboard.map((item) => (
-            <View key={item.userId} style={styles.row}>
-              <View style={[styles.rankCircle, item.rank <= 3 && styles.topRankCircle]}>
-                <Text style={[styles.rankText, item.rank <= 3 && styles.topRankText]}>{item.rank}</Text>
-              </View>
-              <View style={{ flex: 1 }}>
-                <View style={styles.nameRow}>
-                  <Text style={styles.nameText} numberOfLines={1}>{item.displayName}</Text>
-                  {item.rankBadge && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{item.rankBadge}</Text>
-                    </View>
-                  )}
+        /* Podium & List */
+        <View style={styles.leaderboardSection}>
+          {/* Top 3 Honoring Podium */}
+          <LeaderboardPodium top3={top3} />
+
+          {/* Ranks 4+ List */}
+          {remainingRanks.length > 0 && (
+            <View style={styles.remainingSection}>
+              <View style={styles.listHeaderRow}>
+                <Text style={styles.listSectionTitle}>BẢNG XẾP HẠNG TỔNG HỢP</Text>
+                <View style={styles.listCountBadge}>
+                  <Text style={styles.listCountText}>Top {leaderboard.length}</Text>
                 </View>
-                <Text style={styles.subText}>
-                  {item.reputationTier} · {item.contributionsCount} đóng góp · {item.expPoints} EXP
-                </Text>
               </View>
-              <View style={styles.scoreCol}>
-                <Text style={styles.scoreVal}>{item.reputationScore}</Text>
-                <Text style={styles.scoreUnit}>Uy tín</Text>
+
+              <View style={styles.list}>
+                {remainingRanks.map((item) => (
+                  <View key={item.userId} style={styles.row}>
+                    <View style={styles.rankCircle}>
+                      <Text style={styles.rankText}>{item.rank}</Text>
+                    </View>
+
+                    <View style={styles.itemAvatar}>
+                      <Text style={styles.itemAvatarText}>{getInitials(item.displayName)}</Text>
+                    </View>
+
+                    <View style={styles.itemInfo}>
+                      <View style={styles.nameRow}>
+                        <Text style={styles.nameText} numberOfLines={1}>{item.displayName}</Text>
+                        {item.rankBadge && (
+                          <View style={styles.badge}>
+                            <Text style={styles.badgeText}>{item.rankBadge}</Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.subText}>
+                        {item.reputationTier} · {item.contributionsCount} đóng góp · {item.expPoints} EXP
+                      </Text>
+                    </View>
+
+                    <View style={styles.scoreCol}>
+                      <Text style={styles.scoreVal}>{item.reputationScore}</Text>
+                      <Text style={styles.scoreUnit}>Uy tín</Text>
+                    </View>
+                  </View>
+                ))}
               </View>
             </View>
-          ))}
+          )}
         </View>
       )}
     </ScrollView>
   );
 }
 
-interface LeaderboardModalProps {
+export interface LeaderboardModalProps {
   visible: boolean;
   isGuest: boolean;
   onClose: () => void;
+  onStartContribution?: () => void;
 }
 
-export function LeaderboardModal({ visible, isGuest, onClose }: LeaderboardModalProps) {
+export function LeaderboardModal({
+  visible,
+  isGuest,
+  onClose,
+  onStartContribution,
+}: LeaderboardModalProps) {
   const insets = useSafeAreaInsets();
   const safeTop = Math.max(
     insets.top,
@@ -358,7 +635,7 @@ export function LeaderboardModal({ visible, isGuest, onClose }: LeaderboardModal
           </TouchableOpacity>
         </View>
 
-        <LeaderboardContent isGuest={isGuest} />
+        <LeaderboardContent isGuest={isGuest} onStartContribution={onStartContribution} />
       </View>
     </Modal>
   );
@@ -387,7 +664,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 17, fontWeight: '800', color: '#0F172A' },
   closeBtn: { padding: 6, borderRadius: 16, backgroundColor: '#F1F5F9' },
-  content: { padding: 16, gap: 14, paddingBottom: 32 },
+  content: { padding: 16, gap: 16, paddingBottom: 36 },
+
+  /* Policy Card */
   policyCard: {
     backgroundColor: '#F0FDFA',
     borderRadius: 16,
@@ -399,20 +678,359 @@ const styles = StyleSheet.create({
   policyHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
   policyTitle: { fontSize: 13.5, fontWeight: '800', color: '#004F58' },
   policyLine: { fontSize: 12.5, color: '#134E4A', lineHeight: 18 },
+
+  /* Personal Rank Card */
   mySummaryCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#99F6E4',
     padding: 16,
+    shadowColor: '#004F58',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 6,
+    elevation: 2,
   },
-  mySummaryLabel: { fontSize: 11, fontWeight: '800', color: '#006874', marginBottom: 10, letterSpacing: 0.4 },
-  mySummaryRow: { flexDirection: 'row', justifyContent: 'space-around' },
-  myStat: { alignItems: 'center' },
-  myStatValue: { fontSize: 20, fontWeight: '800', color: '#004F58' },
-  myStatSub: { fontSize: 12, color: '#64748B', marginTop: 2 },
-  centered: { paddingVertical: 40, alignItems: 'center' },
-  list: { gap: 10 },
+  mySummaryHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  mySummaryLabel: { fontSize: 11, fontWeight: '800', color: '#006874', letterSpacing: 0.4 },
+  tierPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#E6F8F5',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+  },
+  tierPillText: { fontSize: 10.5, fontWeight: '700', color: '#006874' },
+  mySummaryRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  myStat: { alignItems: 'center', flex: 1 },
+  myStatDivider: { width: 1, height: 26, backgroundColor: '#E2E8F0' },
+  myStatValue: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
+  myStatSub: { fontSize: 11, color: '#64748B', marginTop: 2 },
+
+  /* Skeleton Shimmer */
+  skeletonContainer: { gap: 16, paddingVertical: 8 },
+  skeletonPolicyCard: {
+    height: 80,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 16,
+  },
+  skeletonPodiumWrapper: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    gap: 12,
+  },
+  skeletonPodiumCol: {
+    flex: 1,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 14,
+  },
+  skeletonRow: {
+    height: 64,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 16,
+  },
+
+  /* Empty State */
+  emptyContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    padding: 32,
+    alignItems: 'center',
+    marginVertical: 12,
+    gap: 12,
+  },
+  emptyIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#F0FDFA',
+    borderWidth: 1.5,
+    borderColor: '#99F6E4',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0F172A',
+    textAlign: 'center',
+  },
+  emptySubtitle: {
+    fontSize: 13,
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 19,
+    paddingHorizontal: 10,
+  },
+  emptyActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#006874',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 14,
+    marginTop: 6,
+  },
+  emptyActionBtnText: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+
+  /* Leaderboard Podium */
+  leaderboardSection: { gap: 16 },
+  podiumContainer: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingTop: 16,
+    paddingHorizontal: 12,
+    paddingBottom: 4,
+    shadowColor: '#004F58',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  podiumHeaderBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 6,
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  podiumHeaderText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#92400E',
+    letterSpacing: 0.6,
+  },
+  podiumRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  podiumColumn: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  goldColumn: {
+    transform: [{ translateY: -10 }],
+    zIndex: 2,
+  },
+  crownFloating: {
+    marginBottom: -4,
+    zIndex: 3,
+  },
+  avatarWrapper: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarCircle: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+  },
+  goldAvatar: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: '#FEF08A',
+    borderColor: '#F59E0B',
+    borderWidth: 3,
+    shadowColor: '#F59E0B',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 4,
+  },
+  silverAvatar: {
+    backgroundColor: '#F1F5F9',
+    borderColor: '#94A3B8',
+  },
+  bronzeAvatar: {
+    backgroundColor: '#FFEDD5',
+    borderColor: '#FB923C',
+  },
+  avatarInitials: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#334155',
+  },
+  goldInitials: {
+    fontSize: 18,
+    color: '#92400E',
+  },
+  podiumMedalBadge: {
+    position: 'absolute',
+    bottom: -4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  goldMedal: {
+    backgroundColor: '#FEF3C7',
+    borderColor: '#F59E0B',
+  },
+  silverMedal: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#CBD5E1',
+  },
+  bronzeMedal: {
+    backgroundColor: '#FFF7ED',
+    borderColor: '#FDBA74',
+  },
+  goldMedalText: { fontSize: 10, fontWeight: '800', color: '#B45309' },
+  silverMedalText: { fontSize: 10, fontWeight: '800', color: '#475569' },
+  bronzeMedalText: { fontSize: 10, fontWeight: '800', color: '#C2410C' },
+
+  podiumName: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#1E293B',
+    marginTop: 8,
+    textAlign: 'center',
+    maxWidth: '92%',
+  },
+  goldName: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  podiumScorePill: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  goldScorePill: {
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  silverScorePill: {
+    backgroundColor: '#F1F5F9',
+  },
+  bronzeScorePill: {
+    backgroundColor: '#FFF7ED',
+  },
+  goldScoreText: { fontSize: 13, fontWeight: '800', color: '#B45309' },
+  silverScoreText: { fontSize: 12, fontWeight: '800', color: '#334155' },
+  bronzeScoreText: { fontSize: 12, fontWeight: '800', color: '#C2410C' },
+  goldScoreLabel: { fontSize: 9.5, fontWeight: '700', color: '#92400E' },
+  podiumScoreLabel: { fontSize: 9, color: '#64748B' },
+  podiumSubText: {
+    fontSize: 10,
+    color: '#64748B',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  goldSubText: {
+    fontSize: 10.5,
+    fontWeight: '600',
+    color: '#78350F',
+  },
+
+  /* Pedestal Steps */
+  stepBase: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 8,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    marginTop: 10,
+  },
+  goldStep: {
+    height: 84,
+    backgroundColor: '#FEF9C3',
+    borderWidth: 1.5,
+    borderColor: '#FDE047',
+    borderBottomWidth: 0,
+  },
+  silverStep: {
+    height: 64,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderBottomWidth: 0,
+  },
+  bronzeStep: {
+    height: 50,
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FED7AA',
+    borderBottomWidth: 0,
+  },
+  goldStepNum: { fontSize: 24, fontWeight: '900', color: '#B45309', lineHeight: 28 },
+  silverStepNum: { fontSize: 20, fontWeight: '900', color: '#64748B', lineHeight: 24 },
+  bronzeStepNum: { fontSize: 18, fontWeight: '900', color: '#C2410C', lineHeight: 22 },
+  goldStepTitle: { fontSize: 10, fontWeight: '800', color: '#92400E' },
+  stepTitle: { fontSize: 9.5, fontWeight: '700', color: '#64748B' },
+
+  /* Remaining Section (Ranks 4+) */
+  remainingSection: { gap: 10 },
+  listHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    marginTop: 4,
+  },
+  listSectionTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#475569',
+    letterSpacing: 0.5,
+  },
+  listCountBadge: {
+    backgroundColor: '#E2E8F0',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  listCountText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  list: { gap: 9 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -422,23 +1040,42 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#E2E8F0',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 3,
+    elevation: 1,
   },
   rankCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: '#F1F5F9',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  topRankCircle: { backgroundColor: '#99F6E4' },
-  rankText: { fontSize: 14, fontWeight: '800', color: '#475569' },
-  topRankText: { color: '#004F58' },
+  rankText: { fontSize: 13, fontWeight: '800', color: '#475569' },
+  itemAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#E6F8F5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#99F6E4',
+  },
+  itemAvatarText: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    color: '#004F58',
+  },
+  itemInfo: { flex: 1 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  nameText: { fontSize: 14.5, fontWeight: '700', color: '#0F172A', flexShrink: 1 },
-  badge: { backgroundColor: '#E6F8F5', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8 },
-  badgeText: { fontSize: 10, fontWeight: '800', color: '#006874' },
-  subText: { fontSize: 12, color: '#64748B', marginTop: 2 },
+  nameText: { fontSize: 14, fontWeight: '700', color: '#0F172A', flexShrink: 1 },
+  badge: { backgroundColor: '#F1F5F9', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
+  badgeText: { fontSize: 10, fontWeight: '700', color: '#475569' },
+  subText: { fontSize: 11.5, color: '#64748B', marginTop: 2 },
   scoreCol: { alignItems: 'flex-end' },
   scoreVal: { fontSize: 16, fontWeight: '800', color: '#006874' },
   scoreUnit: { fontSize: 10, color: '#64748B', fontWeight: '600' },
