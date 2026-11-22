@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/shared/
 import { cn } from "@/shared/lib/cn";
 
 function resolveMediaBaseUrl(): string {
-  return getApiBaseUrl() || "http://localhost:5256";
+  return getApiBaseUrl() || "http://localhost:5267";
 }
 
 function getSafeEvidenceUrl(url?: string): string {

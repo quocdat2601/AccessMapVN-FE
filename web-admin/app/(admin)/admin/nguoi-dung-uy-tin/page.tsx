@@ -364,7 +364,7 @@ export default function AdminUsersReputationPage() {
     }
 
     if (reason.trim().length < 10) {
-      setActionError("Lý do điều chỉnh theo quy trình WF-04 phải có ít nhất 10 ký tự.");
+      setActionError("Lý do điều chỉnh phải có ít nhất 10 ký tự.");
       return;
     }
 
@@ -393,7 +393,7 @@ export default function AdminUsersReputationPage() {
         "/api/v1/admin/reputation-adjustments",
         { method: "POST", body: bodyPayload },
       );
-      setActionSuccess(`Đã tiếp nhận yêu cầu điều chỉnh WF-04 (Event ${res.data.eventId}, trạng thái ${res.data.status}).`);
+      setActionSuccess(`Đã tiếp nhận yêu cầu điều chỉnh (Mã ${res.data.eventId}, trạng thái ${res.data.status}).`);
       setSelectedUser(null);
       setReason("");
       triggerReload();
@@ -401,7 +401,7 @@ export default function AdminUsersReputationPage() {
       if (cause instanceof ApiError && cause.status === 403) {
         setActionError("Bị từ chối (403): Quản trị viên không được tự điều chỉnh hoặc có xung đột lợi ích với hồ sơ nguồn.");
       } else {
-        setActionError(cause instanceof Error ? cause.message : "Không thể gửi yêu cầu điều chỉnh WF-04.");
+        setActionError(cause instanceof Error ? cause.message : "Không thể gửi yêu cầu điều chỉnh.");
       }
     } finally {
       setIsSubmitting(false);
@@ -488,13 +488,13 @@ export default function AdminUsersReputationPage() {
     <div className="mx-auto w-full max-w-[1400px] space-y-4 p-4 sm:p-6">
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold text-teal-700">Nền tảng · Quản trị thành viên & WF-04</p>
+          <p className="text-xs font-semibold text-teal-700">Nền tảng · Quản trị thành viên & Uy tín</p>
           <h1 className="mt-1 flex items-center gap-2 text-2xl font-extrabold text-slate-950">
             <UsersRound className="size-6 text-teal-700" />
             Người dùng & Uy tín đóng góp
           </h1>
           <p className="mt-0.5 text-sm text-slate-500">
-            Quản lý 3 chỉ số độc lập WF-04 (Điểm chấp hành · Độ chính xác đóng góp · Điểm xếp hạng), sự kiện giữ chờ và phiếu bầu cộng đồng.
+            Quản lý điểm chấp hành, độ chính xác đóng góp, điểm xếp hạng, sự kiện giữ chờ và phiếu bầu cộng đồng.
           </p>
         </div>
         <Button variant="outline" onClick={triggerReload} disabled={isLoading}>
@@ -514,7 +514,7 @@ export default function AdminUsersReputationPage() {
           }}
         >
           <UsersRound className="size-4" />
-          Tài khoản & 3 chỉ số WF-04
+          Tài khoản & Chỉ số uy tín
         </Button>
         <Button
           variant={activeTab === "events" ? "default" : "outline"}
@@ -560,7 +560,7 @@ export default function AdminUsersReputationPage() {
             <CardHeader className="flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <CardTitle>Danh sách tài khoản ({users.length})</CardTitle>
-                <CardDescription>Hiển thị 3 chỉ số WF-04 tách biệt và kiểm soát trạng thái tài khoản</CardDescription>
+                <CardDescription>Theo dõi chỉ số uy tín và kiểm soát trạng thái tài khoản</CardDescription>
               </div>
               <div className="flex flex-wrap gap-2">
                 <div className="relative">
@@ -663,7 +663,7 @@ export default function AdminUsersReputationPage() {
                                   setActionSuccess(null);
                                 }}
                               >
-                                Điều chỉnh WF-04
+                                Điều chỉnh uy tín
                               </Button>
                             </div>
                           </td>
@@ -737,7 +737,7 @@ export default function AdminUsersReputationPage() {
                 <form onSubmit={handleAdjustSubmit} className="space-y-3 rounded-xl border border-teal-200 bg-teal-50/40 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h3 className="text-sm font-bold text-slate-900">
-                      Điều chỉnh WF-04: {selectedUser.name}
+                      Điều chỉnh uy tín: {selectedUser.name}
                     </h3>
                     <div className="flex items-center gap-2">
                       {!selectedUser.isLegacy && (
@@ -747,7 +747,7 @@ export default function AdminUsersReputationPage() {
                           variant="outline"
                           onClick={() => setUseLegacyMode((v) => !v)}
                         >
-                          {useLegacyMode ? "Chuyển sang WF-04 có cấu trúc" : "Chế độ điểm đơn giản (Legacy)"}
+                          {useLegacyMode ? "Chuyển sang điều chỉnh chi tiết" : "Chế độ cộng/trừ điểm nhanh"}
                         </Button>
                       )}
                       <Button type="button" size="sm" variant="ghost" onClick={() => setSelectedUser(null)}>
@@ -784,16 +784,16 @@ export default function AdminUsersReputationPage() {
                   ) : (
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       <div>
-                        <label className="mb-1 block text-xs font-semibold text-slate-600">Hành động WF-04</label>
+                        <label className="mb-1 block text-xs font-semibold text-slate-600">Loại điều chỉnh</label>
                         <select
                           value={adjustAction}
                           onChange={(e) => setAdjustAction(e.target.value as typeof adjustAction)}
                           className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
                         >
-                          <option value="ConfirmViolation">ConfirmViolation (Trừ chấp hành)</option>
-                          <option value="ReverseStandingEffect">ReverseStandingEffect (Hoàn điểm chấp hành)</option>
-                          <option value="RevokeReward">RevokeReward (Thu hồi điểm thưởng)</option>
-                          <option value="RestoreReward">RestoreReward (Khôi phục điểm thưởng)</option>
+                          <option value="ConfirmViolation">Xác nhận vi phạm (Trừ điểm chấp hành)</option>
+                          <option value="ReverseStandingEffect">Hoàn điểm chấp hành</option>
+                          <option value="RevokeReward">Thu hồi điểm thưởng</option>
+                          <option value="RestoreReward">Khôi phục điểm thưởng</option>
                         </select>
                       </div>
                       <div>

@@ -215,8 +215,8 @@ export default function SystemSettingsPage() {
             <ShieldCheck className="size-4 text-teal-700 shrink-0" />
             <span className="font-semibold text-teal-900">Phiên bản chính sách chuẩn:</span>
             <Badge variant="neutral" className="font-mono">qcvn10-2024-accessmap-v1</Badge>
-            <Badge variant="blue" className="font-mono">WF-04: v3-metrics-3</Badge>
-            <Badge variant="teal">WF-02 Diversity Cap: 60%/user</Badge>
+            <Badge variant="blue">Chính sách uy tín: v3</Badge>
+            <Badge variant="teal">Giới hạn tỷ trọng phiếu: 60%/người</Badge>
           </div>
         </CardContent>
       </Card>
@@ -227,17 +227,17 @@ export default function SystemSettingsPage() {
         <Card className="shadow-sm">
           <CardHeader>
             <div className="flex items-center gap-2 text-teal-700 font-semibold text-sm">
-              <Sparkles className="size-4" /> Trọng số & Phân luồng AI (WF-01)
+              <Sparkles className="size-4" /> Trọng số & Phân luồng AI
             </div>
             <CardTitle className="text-lg">Ngưỡng tự động duyệt đóng góp</CardTitle>
             <CardDescription>
-              Kiểm soát quy tắc BR-08, BR-09, BR-10 cho hồ sơ gửi từ ứng dụng di động.
+              Kiểm soát ngưỡng tự động duyệt, chờ bổ sung và đối chiếu cho hồ sơ gửi từ ứng dụng di động.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             <div>
               <div className="flex justify-between items-center text-sm mb-1.5">
-                <span className="font-medium text-slate-800">Điểm tự động duyệt (AutoVerified)</span>
+                <span className="font-medium text-slate-800">Điểm tự động duyệt</span>
                 <span className="font-bold text-teal-700 font-mono">≥ {settings.autoVerifyScoreThreshold}%</span>
               </div>
               <input
@@ -363,7 +363,7 @@ export default function SystemSettingsPage() {
         <Card className="shadow-sm">
           <CardHeader>
             <div className="flex items-center gap-2 text-teal-700 font-semibold text-sm">
-              <Clock className="size-4" /> Quản trị SLA & Chu kỳ bảo vệ hiện trạng (WF-02)
+              <Clock className="size-4" /> Quản trị thời hạn xử lý & Chu kỳ bảo vệ hiện trạng
             </div>
             <CardTitle className="text-lg">Cam kết dịch vụ & Chu kỳ tái thẩm tra</CardTitle>
             <CardDescription>
@@ -373,7 +373,7 @@ export default function SystemSettingsPage() {
           <CardContent className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-slate-800 mb-1">
-                Cửa sổ bảo vệ hiện trạng gốc (Baseline Observation Window)
+                Thời gian bảo vệ hiện trạng gốc
               </label>
               <div className="flex items-center gap-3">
                 <input

@@ -21,6 +21,21 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  async rewrites() {
+    const backendTarget = (
+      process.env.BACKEND_PROXY_TARGET ?? "http://localhost:5267"
+    ).replace(/\/$/, "");
+    return [
+      {
+        source: "/api/v1/:path*",
+        destination: `${backendTarget}/api/v1/:path*`,
+      },
+      {
+        source: "/uploads/:path*",
+        destination: `${backendTarget}/uploads/:path*`,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
