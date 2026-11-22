@@ -15,9 +15,17 @@ import {
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useAccessibility } from '@/features/accessibility';
 import { branding } from '@/shared/config/branding';
+import { useToast } from '@/shared/ui/ToastProvider';
 import {
   type GoogleProfileRequired,
   normalizeVietnamPhone,
@@ -135,6 +143,8 @@ function OtpCodeBoxes({
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { settings, triggerHaptic } = useAccessibility();
+  const { showToast } = useToast();
   const {
     isConfigured,
     isGuest,
@@ -192,6 +202,15 @@ export default function LoginScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [suggestEmailFallback, setSuggestEmailFallback] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [registrationSuccess, setRegistrationSuccess] = useState<{ name: string } | null>(null);
+
+  const authRedirectHandledRef = useRef(false);
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isFirstStepRenderRef = useRef(true);
+
+  const cardOpacity = useSharedValue(1);
+  const cardTranslateY = useSharedValue(0);
+  const checkScale = useSharedValue(1);
 
   // Input refs for keyboard "next" focus
   const loginPasswordRef = useRef<TextInput>(null);
@@ -200,11 +219,87 @@ export default function LoginScreen() {
   const regPasswordRef = useRef<TextInput>(null);
   const regConfirmRef = useRef<TextInput>(null);
 
+  const stepKey = passwordRecoveryPending
+    ? 'recovery'
+    : registrationSuccess
+    ? 'reg-success'
+    : `${mode}-${regStep}`;
+
   useEffect(() => {
-    if (!isGuest && !passwordRecoveryPending) {
+    if (
+      !isGuest &&
+      !passwordRecoveryPending &&
+      !authRedirectHandledRef.current &&
+      !registrationSuccess
+    ) {
       router.replace('/map');
     }
-  }, [isGuest, passwordRecoveryPending, router]);
+  }, [isGuest, passwordRecoveryPending, registrationSuccess, router]);
+
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current) {
+        clearTimeout(successTimerRef.current);
+        successTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isFirstStepRenderRef.current) {
+      isFirstStepRenderRef.current = false;
+      return;
+    }
+    if (settings.reduceMotion) {
+      cardOpacity.value = 1;
+      cardTranslateY.value = 0;
+      return;
+    }
+    cardOpacity.value = 0;
+    cardTranslateY.value = 10;
+    cardOpacity.value = withTiming(1, {
+      duration: 200,
+      easing: Easing.out(Easing.cubic),
+    });
+    cardTranslateY.value = withTiming(0, {
+      duration: 200,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [cardOpacity, cardTranslateY, settings.reduceMotion, stepKey]);
+
+  useEffect(() => {
+    if (!registrationSuccess || settings.reduceMotion) {
+      checkScale.value = 1;
+      return;
+    }
+    checkScale.value = 0.72;
+    checkScale.value = withTiming(1, {
+      duration: 240,
+      easing: Easing.out(Easing.back(1.6)),
+    });
+  }, [checkScale, registrationSuccess, settings.reduceMotion]);
+
+  const stepCardAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: cardOpacity.value,
+    transform: [{ translateY: cardTranslateY.value }],
+  }));
+
+  const checkAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: checkScale.value }],
+  }));
+
+  const finishRegistrationNavigation = (displayName: string) => {
+    if (successTimerRef.current) {
+      clearTimeout(successTimerRef.current);
+      successTimerRef.current = null;
+    }
+    showToast({
+      message: `Chào mừng ${displayName} đến với AccessMap VN!`,
+      variant: 'success',
+      durationMs: 3000,
+    });
+    router.replace('/map');
+  };
 
   useEffect(() => {
     if (regStep !== 'otp' && !googlePhoneChallenge) return;
@@ -251,12 +346,19 @@ export default function LoginScreen() {
       return;
     }
 
+    authRedirectHandledRef.current = true;
     setIsSubmitting(true);
     resetMessages();
     try {
       await signIn(trimmed, password);
+      triggerHaptic(30);
+      showToast({
+        message: 'Đăng nhập thành công! Chào mừng trở lại.',
+        variant: 'success',
+      });
       router.replace('/map');
     } catch (error) {
+      authRedirectHandledRef.current = false;
       setErrorMessage(error instanceof Error ? error.message : 'Không thể đăng nhập tài khoản.');
     } finally {
       setIsSubmitting(false);
@@ -326,6 +428,7 @@ export default function LoginScreen() {
       return;
     }
 
+    authRedirectHandledRef.current = true;
     setIsSubmitting(true);
     resetMessages();
     try {
@@ -337,16 +440,26 @@ export default function LoginScreen() {
         loginIdentifier: cleanEmail,
       });
       if (result.signedIn) {
-        router.replace('/map');
+        const cleanName = fullName.normalize('NFC').replace(/\s+/g, ' ').trim() || 'bạn';
+        triggerHaptic(50);
+        setRegistrationSuccess({ name: cleanName });
+        successTimerRef.current = setTimeout(
+          () => finishRegistrationNavigation(cleanName),
+          settings.reduceMotion ? 900 : 1200
+        );
       } else {
+        authRedirectHandledRef.current = false;
         handleModeSwitch('signIn');
         setLoginIdentifier(cleanEmail);
-        Alert.alert(
-          'Đăng ký thành công',
-          'Tài khoản đã được kích hoạt. Vui lòng đăng nhập với thông tin vừa tạo.'
-        );
+        triggerHaptic(40);
+        showToast({
+          message: 'Tạo tài khoản thành công! Vui lòng đăng nhập.',
+          variant: 'success',
+          durationMs: 3200,
+        });
       }
     } catch (error) {
+      authRedirectHandledRef.current = false;
       setErrorMessage(error instanceof Error ? error.message : 'Không thể hoàn tất đăng ký.');
     } finally {
       setIsSubmitting(false);
@@ -390,13 +503,19 @@ export default function LoginScreen() {
       return;
     }
 
+    authRedirectHandledRef.current = true;
     setIsSubmitting(true);
     resetMessages();
     try {
       await completePasswordRecovery(recoveryPassword);
-      Alert.alert('Thành công', 'Mật khẩu mới đã được cập nhật.');
+      triggerHaptic(40);
+      showToast({
+        message: 'Mật khẩu mới đã được cập nhật.',
+        variant: 'success',
+      });
       router.replace('/map');
     } catch (error) {
+      authRedirectHandledRef.current = false;
       setErrorMessage(
         error instanceof Error ? error.message : 'Không thể cập nhật mật khẩu mới.'
       );
@@ -406,14 +525,21 @@ export default function LoginScreen() {
   };
 
   const handleGoogleAuth = async () => {
+    authRedirectHandledRef.current = true;
     setIsGoogleLoading(true);
     resetMessages();
     try {
       const outcome = await startGoogleOAuth();
       if (outcome.status === 'signed_in') {
+        triggerHaptic(30);
+        showToast({
+          message: 'Đăng nhập Google thành công!',
+          variant: 'success',
+        });
         router.replace('/map');
         return;
       }
+      authRedirectHandledRef.current = false;
       if (outcome.status === 'profile_required') {
         setGoogleProfile(outcome.profile);
         setGoogleName(outcome.profile.suggestedName ?? '');
@@ -425,6 +551,7 @@ export default function LoginScreen() {
         setGoogleError(null);
       }
     } catch (error) {
+      authRedirectHandledRef.current = false;
       setErrorMessage(
         error instanceof Error ? error.message : 'Không thể đăng nhập với tài khoản Google.'
       );
@@ -499,6 +626,7 @@ export default function LoginScreen() {
       phoneOtpClean = digits;
     }
 
+    authRedirectHandledRef.current = true;
     setIsSubmitting(true);
     setGoogleError(null);
     try {
@@ -510,9 +638,17 @@ export default function LoginScreen() {
         phoneChallengeId: challengeId,
         phoneOtp: phoneOtpClean,
       });
+      const cleanName = googleName.normalize('NFC').replace(/\s+/g, ' ').trim() || 'bạn';
       setGoogleProfile(null);
+      triggerHaptic(50);
+      showToast({
+        message: `Chào mừng ${cleanName} đến với AccessMap VN!`,
+        variant: 'success',
+        durationMs: 3000,
+      });
       router.replace('/map');
     } catch (error) {
+      authRedirectHandledRef.current = false;
       setGoogleError(
         error instanceof Error ? error.message : 'Không thể kích hoạt tài khoản Google.'
       );
@@ -528,6 +664,8 @@ export default function LoginScreen() {
 
   const screenTitle = passwordRecoveryPending
     ? 'Đặt lại mật khẩu mới'
+    : registrationSuccess
+    ? 'Đăng ký thành công'
     : mode === 'signUp' && regStep === 'otp'
     ? 'Xác thực mã OTP'
     : mode === 'signUp'
@@ -587,7 +725,7 @@ export default function LoginScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.content}>
+          <Animated.View style={[styles.content, stepCardAnimatedStyle]}>
             {passwordRecoveryPending ? (
               <View style={styles.formCard}>
                 <Text style={styles.sectionHeading}>Tạo mật khẩu mới</Text>
@@ -661,6 +799,27 @@ export default function LoginScreen() {
                   )}
                 </TouchableOpacity>
               </View>
+            ) : registrationSuccess ? (
+              <View style={[styles.formCard, styles.successCard]}>
+                <Animated.View style={[styles.successBadgeCircle, checkAnimatedStyle]}>
+                  <Ionicons name="checkmark-circle" size={40} color="#059669" />
+                </Animated.View>
+                <Text style={styles.successTitle}>Tạo tài khoản thành công!</Text>
+                <Text style={styles.successSubtitle}>
+                  Chào mừng {registrationSuccess.name} đến với AccessMap VN. Đang chuyển tới bản đồ...
+                </Text>
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  activeOpacity={0.85}
+                  onPress={() => finishRegistrationNavigation(registrationSuccess.name)}
+                  style={[styles.primaryButton, { width: '100%' }]}
+                >
+                  <View style={styles.primaryButtonInner}>
+                    <Text style={styles.primaryButtonText}>Khám phá ngay</Text>
+                    <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+                  </View>
+                </TouchableOpacity>
+              </View>
             ) : (
               <>
                 {!(mode === 'signUp' && regStep === 'otp') && (
@@ -676,7 +835,7 @@ export default function LoginScreen() {
                       <Text style={styles.appName}>{branding.appName}</Text>
                       <Text style={styles.supportingText}>
                         {mode === 'signIn'
-                          ? 'Đăng nhập để lưu điểm EXP và vinh danh đóng góp'
+                          ? 'Đăng nhập để lưu điểm danh vọng, uy tín và vinh danh đóng góp'
                           : 'Tham gia cộng đồng xây dựng bản đồ tiếp cận Việt Nam'}
                       </Text>
                     </View>
@@ -1319,17 +1478,19 @@ export default function LoginScreen() {
               </>
             )}
 
-            <TouchableOpacity
-              accessibilityHint="Bỏ qua đăng nhập và mở bản đồ"
-              accessibilityRole="button"
-              activeOpacity={0.7}
-              onPress={() => router.replace('/map')}
-              style={styles.guestButton}
-            >
-              <Text style={styles.guestButtonText}>Vào trải nghiệm chế độ Khách</Text>
-              <Ionicons name="arrow-forward" size={17} color={branding.colors.primary} />
-            </TouchableOpacity>
-          </View>
+            {!registrationSuccess ? (
+              <TouchableOpacity
+                accessibilityHint="Bỏ qua đăng nhập và mở bản đồ"
+                accessibilityRole="button"
+                activeOpacity={0.7}
+                onPress={() => router.replace('/map')}
+                style={styles.guestButton}
+              >
+                <Text style={styles.guestButtonText}>Vào trải nghiệm chế độ Khách</Text>
+                <Ionicons name="arrow-forward" size={17} color={branding.colors.primary} />
+              </TouchableOpacity>
+            ) : null}
+          </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -2219,5 +2380,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  successCard: {
+    alignItems: 'center',
+    paddingVertical: 28,
+    paddingHorizontal: 22,
+  },
+  successBadgeCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: '#DCFCE7',
+    borderWidth: 1.5,
+    borderColor: '#86EFAC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  successTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#0F172A',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  successSubtitle: {
+    fontSize: 13.5,
+    color: '#475569',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 20,
   },
 });

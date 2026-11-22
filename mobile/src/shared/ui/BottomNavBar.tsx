@@ -1,8 +1,15 @@
 import React from 'react';
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAccessibility } from '@/features/accessibility';
 import { startContributionFlow } from '@/features/contribution';
 
 export type BottomNavTab = 'map' | 'contribute' | 'community' | 'profile';
@@ -13,12 +20,83 @@ interface BottomNavBarProps {
   onContributePress?: () => void;
 }
 
+interface NavTabButtonProps {
+  active: boolean;
+  reduceMotion: boolean;
+  accessibilityLabel: string;
+  label: string;
+  onPress: () => void;
+  renderIcon: (color: string) => React.ReactNode;
+}
+
+function NavTabButton({
+  active,
+  reduceMotion,
+  accessibilityLabel,
+  label,
+  onPress,
+  renderIcon,
+}: NavTabButtonProps) {
+  const pillScale = useSharedValue(1);
+  const pillAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pillScale.value }],
+  }));
+
+  const handlePressIn = () => {
+    if (reduceMotion) return;
+    pillScale.set(
+      withTiming(0.92, {
+        duration: 110,
+        easing: Easing.out(Easing.quad),
+      })
+    );
+  };
+
+  const handlePressOut = () => {
+    if (reduceMotion) {
+      pillScale.set(1);
+      return;
+    }
+    pillScale.set(
+      withTiming(1, {
+        duration: 110,
+        easing: Easing.out(Easing.quad),
+      })
+    );
+  };
+
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.tabItem, pressed && styles.tabItemPressed]}
+      onPress={onPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      hitSlop={6}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={accessibilityLabel}
+    >
+      <Animated.View
+        style={[styles.iconPill, active && styles.iconPillActive, pillAnimatedStyle]}
+      >
+        {renderIcon(active ? '#004F58' : '#475569')}
+      </Animated.View>
+      <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 export function BottomNavBar({ activeTab, onTabPress, onContributePress }: BottomNavBarProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { settings, triggerHaptic } = useAccessibility();
   const bottomPad = Math.max(insets.bottom, Platform.OS === 'ios' ? 12 : 8);
 
   const handlePress = (tab: BottomNavTab) => {
+    if (tab !== activeTab || tab === 'contribute') {
+      triggerHaptic(15);
+    }
+
     if (tab === 'contribute') {
       if (onContributePress) {
         onContributePress();
@@ -59,88 +137,64 @@ export function BottomNavBar({ activeTab, onTabPress, onContributePress }: Botto
     <View style={[styles.container, { paddingBottom: bottomPad }]}>
       <View style={styles.innerRow}>
         {/* 1. Bản đồ */}
-        <TouchableOpacity
-          style={styles.tabItem}
-          onPress={() => handlePress('map')}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: activeTab === 'map' }}
+        <NavTabButton
+          active={activeTab === 'map'}
+          reduceMotion={settings.reduceMotion}
           accessibilityLabel="Bản đồ"
-          activeOpacity={0.7}
-        >
-          <View style={[styles.iconPill, activeTab === 'map' && styles.iconPillActive]}>
-            <Ionicons
-              name={activeTab === 'map' ? 'map' : 'map-outline'}
-              size={19}
-              color={activeTab === 'map' ? '#004F58' : '#475569'}
-            />
-          </View>
-          <Text style={[styles.tabLabel, activeTab === 'map' && styles.tabLabelActive]}>
-            Bản đồ
-          </Text>
-        </TouchableOpacity>
+          label="Bản đồ"
+          onPress={() => handlePress('map')}
+          renderIcon={(color) => (
+            <Ionicons name={activeTab === 'map' ? 'map' : 'map-outline'} size={19} color={color} />
+          )}
+        />
 
         {/* 2. Đóng góp */}
-        <TouchableOpacity
-          style={styles.tabItem}
-          onPress={() => handlePress('contribute')}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: activeTab === 'contribute' }}
+        <NavTabButton
+          active={activeTab === 'contribute'}
+          reduceMotion={settings.reduceMotion}
           accessibilityLabel="Đóng góp"
-          activeOpacity={0.7}
-        >
-          <View style={[styles.iconPill, activeTab === 'contribute' && styles.iconPillActive]}>
+          label="Đóng góp"
+          onPress={() => handlePress('contribute')}
+          renderIcon={(color) => (
             <MaterialCommunityIcons
               name={activeTab === 'contribute' ? 'map-marker-plus' : 'map-marker-plus-outline'}
               size={21}
-              color={activeTab === 'contribute' ? '#004F58' : '#475569'}
+              color={color}
             />
-          </View>
-          <Text style={[styles.tabLabel, activeTab === 'contribute' && styles.tabLabelActive]}>
-            Đóng góp
-          </Text>
-        </TouchableOpacity>
+          )}
+        />
 
         {/* 3. Cộng đồng */}
-        <TouchableOpacity
-          style={styles.tabItem}
-          onPress={() => handlePress('community')}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: activeTab === 'community' }}
+        <NavTabButton
+          active={activeTab === 'community'}
+          reduceMotion={settings.reduceMotion}
           accessibilityLabel="Cộng đồng & Bảng xếp hạng"
-          activeOpacity={0.7}
-        >
-          <View style={[styles.iconPill, activeTab === 'community' && styles.iconPillActive]}>
+          label="Cộng đồng"
+          onPress={() => handlePress('community')}
+          renderIcon={(color) => (
             <Ionicons
               name={activeTab === 'community' ? 'chatbubbles' : 'chatbubbles-outline'}
               size={20}
-              color={activeTab === 'community' ? '#004F58' : '#475569'}
+              color={color}
             />
-          </View>
-          <Text style={[styles.tabLabel, activeTab === 'community' && styles.tabLabelActive]}>
-            Cộng đồng
-          </Text>
-        </TouchableOpacity>
+          )}
+        />
 
         {/* 4. Cá nhân */}
-        <TouchableOpacity
-          style={styles.tabItem}
-          onPress={() => handlePress('profile')}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: activeTab === 'profile' }}
+        <NavTabButton
+          active={activeTab === 'profile'}
+          reduceMotion={settings.reduceMotion}
           accessibilityLabel="Cá nhân"
-          activeOpacity={0.7}
-        >
-          <View style={[styles.iconPill, activeTab === 'profile' && styles.iconPillActive]}>
+          label="Cá nhân"
+          onPress={() => handlePress('profile')}
+          renderIcon={(color) => (
             <Ionicons
               name={activeTab === 'profile' ? 'person-circle' : 'person-circle-outline'}
               size={22}
-              color={activeTab === 'profile' ? '#004F58' : '#475569'}
+              color={color}
             />
-          </View>
-          <Text style={[styles.tabLabel, activeTab === 'profile' && styles.tabLabelActive]}>
-            Cá nhân
-          </Text>
-        </TouchableOpacity>
+          )}
+        />
       </View>
     </View>
   );
@@ -169,9 +223,13 @@ const styles = StyleSheet.create({
   },
   tabItem: {
     flex: 1,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 2,
+  },
+  tabItemPressed: {
+    opacity: 0.85,
   },
   iconPill: {
     width: 62,

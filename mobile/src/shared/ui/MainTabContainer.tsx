@@ -1,12 +1,12 @@
 import React, { useCallback, useRef, useState } from 'react';
 import {
   Animated,
-  Dimensions,
   Easing,
   StyleSheet,
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useAccessibility } from '@/features/accessibility';
 import { DiscoveryScreen } from '@/features/discovery';
 import { startContributionFlow } from '@/features/contribution';
 import { CommunityScreen } from '@/features/community';
@@ -15,28 +15,19 @@ import { BottomNavBar, type BottomNavTab } from './BottomNavBar';
 
 export type MainNavTab = 'map' | 'community' | 'profile';
 
-const TAB_INDEX: Record<MainNavTab, number> = {
-  map: 0,
-  community: 2,
-  profile: 3,
-};
-
 interface MainTabContainerProps {
   initialTab?: MainNavTab;
 }
 
 export function MainTabContainer({ initialTab = 'map' }: MainTabContainerProps) {
   const router = useRouter();
-  const screenWidth = Dimensions.get('window').width;
+  const { settings } = useAccessibility();
 
   const [activeTab, setActiveTab] = useState<MainNavTab>(initialTab);
   const [prevTab, setPrevTab] = useState<MainNavTab | null>(null);
   const [isPlaceSelected, setIsPlaceSelected] = useState(false);
 
-  // Animation driver:
-  // When forward (next > prev): starts at 1, goes to 0
-  // When backward (next < prev): starts at -1, goes to 0
-  const slideAnim = useRef(new Animated.Value(0)).current;
+  const fadeAnim = useRef(new Animated.Value(1)).current;
   const isAnimatingRef = useRef(false);
 
   const handleTabPress = useCallback(
@@ -54,18 +45,21 @@ export function MainTabContainer({ initialTab = 'map' }: MainTabContainerProps) 
       const targetTab = tab as MainNavTab;
       if (targetTab === activeTab || isAnimatingRef.current) return;
 
-      const prevIndex = TAB_INDEX[activeTab];
-      const nextIndex = TAB_INDEX[targetTab];
-      const isForward = nextIndex > prevIndex;
+      if (settings.reduceMotion) {
+        setPrevTab(null);
+        setActiveTab(targetTab);
+        fadeAnim.setValue(1);
+        return;
+      }
 
       isAnimatingRef.current = true;
       setPrevTab(activeTab);
       setActiveTab(targetTab);
 
-      slideAnim.setValue(isForward ? 1 : -1);
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 180,
+      fadeAnim.setValue(0);
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 140,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }).start(() => {
@@ -73,7 +67,7 @@ export function MainTabContainer({ initialTab = 'map' }: MainTabContainerProps) 
         isAnimatingRef.current = false;
       });
     },
-    [activeTab, router, slideAnim]
+    [activeTab, fadeAnim, router, settings.reduceMotion]
   );
 
   const handleContributePress = useCallback(() => {
@@ -85,42 +79,31 @@ export function MainTabContainer({ initialTab = 'map' }: MainTabContainerProps) 
     });
   }, [router]);
 
-  // Compute translateX interpolations:
-  // For incoming screen:
-  const incomingTranslateX = slideAnim.interpolate({
-    inputRange: [-1, 0, 1],
-    outputRange: [-screenWidth, 0, screenWidth],
-  });
-
-  // For outgoing screen:
-  const outgoingTranslateX = slideAnim.interpolate({
-    inputRange: [-1, 0, 1],
-    outputRange: [0, screenWidth, -screenWidth],
-  });
-
-  const getScreenTransform = (tab: MainNavTab) => {
-    if (activeTab === tab && prevTab === null) {
-      return [{ translateX: 0 }];
+  const getTabOpacity = (tab: MainNavTab) => {
+    if (prevTab === null) {
+      return activeTab === tab ? 1 : 0;
     }
-    if (activeTab === tab && prevTab !== null) {
-      return [{ translateX: incomingTranslateX }];
+    if (activeTab === tab) {
+      return fadeAnim;
     }
     if (prevTab === tab) {
-      return [{ translateX: outgoingTranslateX }];
+      return 1;
     }
-    return [{ translateX: screenWidth * 2 }];
+    return 0;
   };
 
   return (
     <View style={styles.rootContainer}>
-      {/* Main content viewport: fixed boundary, only contents slide */}
+      {/* Main content viewport: keep map mounted and cross-fade tabs cleanly */}
       <View style={styles.mainViewport}>
         {/* 1. Map Tab (kept continuously mounted to preserve MapLibre context & tiles) */}
         <Animated.View
           style={[
             styles.screenSlide,
-            { transform: getScreenTransform('map') },
-            activeTab !== 'map' && prevTab !== 'map' && styles.screenHidden,
+            activeTab === 'map' && prevTab !== null && styles.screenIncoming,
+            activeTab !== 'map' && prevTab !== 'map'
+              ? styles.screenHidden
+              : { opacity: getTabOpacity('map') },
           ]}
           pointerEvents={activeTab === 'map' && !prevTab ? 'auto' : 'none'}
         >
@@ -141,7 +124,13 @@ export function MainTabContainer({ initialTab = 'map' }: MainTabContainerProps) 
         {/* 2. Community Tab */}
         {(activeTab === 'community' || prevTab === 'community') && (
           <Animated.View
-            style={[styles.screenSlide, styles.screenElevated, { transform: getScreenTransform('community') }]}
+            style={[
+              styles.screenSlide,
+              activeTab === 'community' && prevTab !== null
+                ? styles.screenIncoming
+                : styles.screenElevated,
+              { opacity: getTabOpacity('community') },
+            ]}
             pointerEvents={activeTab === 'community' && !prevTab ? 'auto' : 'none'}
           >
             <CommunityScreen hideBottomNav={true} />
@@ -151,7 +140,13 @@ export function MainTabContainer({ initialTab = 'map' }: MainTabContainerProps) 
         {/* 3. Profile Tab */}
         {(activeTab === 'profile' || prevTab === 'profile') && (
           <Animated.View
-            style={[styles.screenSlide, styles.screenElevated, { transform: getScreenTransform('profile') }]}
+            style={[
+              styles.screenSlide,
+              activeTab === 'profile' && prevTab !== null
+                ? styles.screenIncoming
+                : styles.screenElevated,
+              { opacity: getTabOpacity('profile') },
+            ]}
             pointerEvents={activeTab === 'profile' && !prevTab ? 'auto' : 'none'}
           >
             <ProfileScreen hideBottomNav={true} />
@@ -159,7 +154,7 @@ export function MainTabContainer({ initialTab = 'map' }: MainTabContainerProps) 
         )}
       </View>
 
-      {/* Rock-solid, fixed Bottom Navigation Bar: NEVER shifts or animates during tab swipes */}
+      {/* Rock-solid, fixed Bottom Navigation Bar */}
       {!isPlaceSelected && (
         <BottomNavBar
           activeTab={activeTab}
@@ -191,6 +186,9 @@ const styles = StyleSheet.create({
   },
   screenElevated: {
     zIndex: 5,
+  },
+  screenIncoming: {
+    zIndex: 6,
   },
   screenHidden: {
     opacity: 0,
