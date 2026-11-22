@@ -194,6 +194,13 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
     userProfile.reputationTier && userProfile.reputationTier !== 'Tân binh'
       ? userProfile.reputationTier
       : 'Người kiểm định Cấp 3';
+  const participationStatusLabel =
+    ({
+      Normal: 'Bình thường',
+      Restricted: 'Hạn chế',
+      Suspended: 'Tạm khóa',
+    } as Record<string, string>)[userProfile.participationStatus] ??
+    userProfile.participationStatus;
 
   return (
     <View style={styles.container}>
@@ -211,15 +218,21 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
             <TouchableOpacity
               style={styles.topIconBtn}
               onPress={handleAccountSettings}
+              accessibilityRole="button"
               accessibilityLabel="Cài đặt"
             >
-              <Ionicons name="settings-outline" size={20} color="#334155" />
+              {isResettingPassword ? (
+                <ActivityIndicator size="small" color="#004F58" />
+              ) : (
+                <Ionicons name="settings-outline" size={20} color="#334155" />
+              )}
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.topUserCircle}
               onPress={() => {
                 if (isGuest) router.push('/login' as any);
               }}
+              accessibilityRole="button"
               accessibilityLabel="Tài khoản"
             >
               <Ionicons name="person-outline" size={16} color="#FFFFFF" />
@@ -232,24 +245,6 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Section Heading Row */}
-        <View style={styles.pageHeadingRow}>
-          <View>
-            <Text style={styles.pageOverline}>TÀI KHOẢN & TIỆN ÍCH</Text>
-            <Text style={styles.pageMainTitle}>Cá nhân</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.pageGearCircle}
-            onPress={handleAccountSettings}
-            activeOpacity={0.78}
-          >
-            {isResettingPassword ? (
-              <ActivityIndicator size="small" color="#004F58" />
-            ) : (
-              <Ionicons name="settings-outline" size={20} color="#334155" />
-            )}
-          </TouchableOpacity>
-        </View>
 
         {/* 1. User Identity Card */}
         <View style={styles.card}>
@@ -363,7 +358,7 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
           </View>
           <View style={{ flex: 1 }}>
             <Text style={styles.cardTitle}>Địa điểm yêu thích</Text>
-            <Text style={styles.favoriteSubText} numberOfLines={1}>
+            <Text style={styles.favoriteSubText} numberOfLines={2}>
               Các địa điểm bạn đã lưu để tra cứu nhanh
             </Text>
           </View>
@@ -389,7 +384,7 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
           </View>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.cardTitle}>Đóng góp của tôi</Text>
-            <Text style={styles.favoriteSubText} numberOfLines={1}>
+            <Text style={styles.favoriteSubText} numberOfLines={2}>
               Xem trạng thái kiểm duyệt &amp; bổ sung minh chứng
             </Text>
           </View>
@@ -451,14 +446,14 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
 
           {/* Sub-box 3: 3 chỉ số độc lập WF-04 */}
           <View style={[styles.rewardInnerBox, { gap: 8 }]}>
-            <Text style={styles.rewardBoxLabelGray}>Chỉ số tài khoản WF-04 (3 thước đo độc lập)</Text>
+            <Text style={styles.rewardBoxLabelGray}>Chỉ số uy tín tài khoản</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 10, padding: 8 }}>
                 <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Chấp hành</Text>
                 <Text style={{ fontSize: 15, fontWeight: '800', color: '#004F58', marginTop: 2 }}>
                   {userProfile.accountStandingScore}/100
                 </Text>
-                <Text style={{ fontSize: 10, color: '#475569' }}>{userProfile.participationStatus}</Text>
+                <Text style={{ fontSize: 10, color: '#475569' }}>{participationStatusLabel}</Text>
               </View>
               <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 10, padding: 8 }}>
                 <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Độ chính xác</Text>
@@ -479,7 +474,7 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
                 <Text style={{ fontSize: 15, fontWeight: '800', color: '#B45309', marginTop: 2 }}>
                   {displayExpPoints}
                 </Text>
-                <Text style={{ fontSize: 10, color: '#475569' }} numberOfLines={1}>
+                <Text style={{ fontSize: 10, color: '#475569' }} numberOfLines={2}>
                   {displayTier}
                 </Text>
               </View>

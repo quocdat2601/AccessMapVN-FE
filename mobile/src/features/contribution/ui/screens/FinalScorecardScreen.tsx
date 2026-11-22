@@ -50,6 +50,20 @@ interface FinalScorecardScreenProps {
   onFinish?: () => void;
 }
 
+const SCOPE_KIND_LABELS: Record<ProposedUploadScope['kind'], string> = {
+  BuildingGeneral: 'Toàn địa điểm',
+  Entrance: 'Lối vào',
+  Floor: 'Theo tầng',
+  Unit: 'Khu / Phòng',
+};
+
+function formatScopeSummary(scope: ProposedUploadScope): string {
+  const kindLabel = SCOPE_KIND_LABELS[scope.kind] ?? scope.kind;
+  const rawLabel = scope.label?.trim();
+  const displayLabel = !rawLabel || rawLabel === 'Whole place' ? kindLabel : rawLabel;
+  return displayLabel === kindLabel ? displayLabel : `${displayLabel} · ${kindLabel}`;
+}
+
 export function FinalScorecardScreen({
   media,
   matrixResult,
@@ -692,7 +706,7 @@ export function FinalScorecardScreen({
                   <View style={styles.detailRow}>
                     <Text style={styles.detailLabel}>Phạm vi:</Text>
                     <Text style={styles.detailValue} numberOfLines={1}>
-                      {proposedScope.label} ({proposedScope.kind})
+                      {formatScopeSummary(proposedScope)}
                     </Text>
                   </View>
                 ) : null}
@@ -759,7 +773,7 @@ export function FinalScorecardScreen({
             <MaterialCommunityIcons name="alert-circle-outline" size={18} color="#e11d48" />
             <View style={{ flex: 1 }}>
               <Text style={styles.dockedAlertTitle}>
-                {isConflictError ? 'Trùng mã phiên (409 Conflict)' : 'Lỗi gửi hồ sơ'}
+                {isConflictError ? 'Hồ sơ đã được gửi trước đó' : 'Lỗi gửi hồ sơ'}
               </Text>
               <Text style={styles.dockedAlertText}>{submitError}</Text>
               {isConflictError && (

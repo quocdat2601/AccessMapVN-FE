@@ -267,7 +267,7 @@ function LeaderboardPodium({ top3 }: LeaderboardPodiumProps) {
                 <Text style={styles.silverMedalText}>2</Text>
               </View>
             </View>
-            <Text style={styles.podiumName} numberOfLines={1}>{rank2.displayName}</Text>
+            <Text style={styles.podiumName} numberOfLines={2}>{rank2.displayName}</Text>
             <View style={[styles.podiumScorePill, styles.silverScorePill]}>
               <Text style={styles.silverScoreText}>{rank2.reputationScore}</Text>
               <Text style={styles.podiumScoreLabel}>uy tín</Text>
@@ -300,7 +300,7 @@ function LeaderboardPodium({ top3 }: LeaderboardPodiumProps) {
                 <Text style={styles.goldMedalText}>1</Text>
               </View>
             </View>
-            <Text style={[styles.podiumName, styles.goldName]} numberOfLines={1}>
+            <Text style={[styles.podiumName, styles.goldName]} numberOfLines={2}>
               {rank1.displayName}
             </Text>
             <View style={[styles.podiumScorePill, styles.goldScorePill]}>
@@ -330,7 +330,7 @@ function LeaderboardPodium({ top3 }: LeaderboardPodiumProps) {
                 <Text style={styles.bronzeMedalText}>3</Text>
               </View>
             </View>
-            <Text style={styles.podiumName} numberOfLines={1}>{rank3.displayName}</Text>
+            <Text style={styles.podiumName} numberOfLines={2}>{rank3.displayName}</Text>
             <View style={[styles.podiumScorePill, styles.bronzeScorePill]}>
               <Text style={styles.bronzeScoreText}>{rank3.reputationScore}</Text>
               <Text style={styles.podiumScoreLabel}>uy tín</Text>
@@ -455,19 +455,7 @@ export function LeaderboardContent({ isGuest, onStartContribution }: Leaderboard
         setMyRep(null);
       }
     } catch {
-      // In case of error/guest, provide a realistic personal fallback stats
-      if (!isGuest) {
-        const fallbackScore = Math.max((userProfile.contributionsCount || 0) * 5, 45);
-        setMyRep({
-          reputationScore: fallbackScore,
-          reputationTier: userProfile.reputationTier || 'Người kiểm định Cấp 3',
-          trustWeight: fallbackScore >= 50 ? 1.5 : 1.0,
-          rank: 2,
-          expPoints: userProfile.expPoints || 450,
-          contributionsCount: userProfile.contributionsCount || 18,
-          recentEvents: [],
-        });
-      }
+      setMyRep(null);
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -536,7 +524,7 @@ export function LeaderboardContent({ isGuest, onStartContribution }: Leaderboard
           </View>
           <View style={styles.mySummaryRow}>
             <View style={styles.myStat}>
-              <Text style={styles.myStatValue}>{myRep.rank ? `#${myRep.rank}` : '#2'}</Text>
+              <Text style={styles.myStatValue}>{myRep.rank ? `#${myRep.rank}` : '—'}</Text>
               <Text style={styles.myStatSub}>Xếp hạng</Text>
             </View>
             <View style={styles.myStatDivider} />

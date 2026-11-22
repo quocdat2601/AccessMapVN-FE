@@ -300,7 +300,11 @@ function ActiveCameraContributionScreen() {
 
   const handleBack = useCallback(() => {
     if (isRecording) cameraRef.current?.stopRecording();
-    router.back();
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/map');
+    }
   }, [isRecording, router]);
 
   const handleGpsPress = useCallback(async () => {
@@ -320,6 +324,7 @@ function ActiveCameraContributionScreen() {
   const handleModeChange = useCallback((nextMode: CaptureMode) => {
     if (isRecording || nextMode === mode) return;
     setMessage(null);
+    setCameraReady(false);
     setMode(nextMode);
   }, [isRecording, mode]);
 
@@ -433,7 +438,8 @@ function ActiveCameraContributionScreen() {
           gps: targetCoords ? { latitude: targetCoords.latitude, longitude: targetCoords.longitude, accuracy: 5.0, timestamp: Date.now() } : gps,
         });
       }
-    } catch {
+    } catch (error) {
+      console.warn('[startVideoRecording] failed:', error);
       if (mounted.current) setMessage('Không thể hoàn tất video. Vui lòng thử quay lại.');
     } finally {
       recordingStartedAt.current = null;
@@ -541,7 +547,7 @@ function ActiveCameraContributionScreen() {
           onRetakeOrReset={handleRetake}
           onEditTags={() => setWorkflowStep('tag_review')}
           flow={flow}
-          onFinish={() => router.back()}
+          onFinish={handleBack}
         />
         <LocationSelectionModal
           visible={showLocationModal}
@@ -669,6 +675,7 @@ function ActiveCameraContributionScreen() {
           onModeChange={(nextMode) => void handleModeChange(nextMode)}
           onCapture={handleCapture}
           onFlip={() => {
+            setCameraReady(false);
             setFacing((current: CameraType) => (current === 'back' ? 'front' : 'back'));
           }}
           leftAction={
@@ -715,7 +722,13 @@ function CameraFallbackScreen() {
       <View style={styles.codeBox}>
         <Text style={styles.codeText}>npx expo run:android</Text>
       </View>
-      <Pressable style={styles.backBtn} onPress={() => router.back()}>
+      <Pressable
+        style={styles.backBtn}
+        onPress={() => {
+          if (router.canGoBack()) router.back();
+          else router.replace('/map');
+        }}
+      >
         <Text style={styles.backBtnText}>Quay lại Bản đồ</Text>
       </Pressable>
     </View>

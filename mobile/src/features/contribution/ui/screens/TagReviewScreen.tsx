@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -96,6 +96,12 @@ export function TagReviewScreen({
   onBack,
 }: TagReviewScreenProps) {
   const insets = useSafeAreaInsets();
+  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollToBottomOnFocus = () => {
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 180);
+  };
   // Khởi tạo: nếu có draft thì khôi phục draft; nếu không thì tự động chọn Có cho các tag AI phát hiện được
   const [observations, setObservations] = useState<ObservationMap>(() => {
     if (initialObservations && Object.keys(initialObservations).length > 0) {
@@ -253,12 +259,15 @@ export function TagReviewScreen({
       </View>
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior="padding"
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 12}
         style={{ flex: 1 }}
       >
         <ScrollView
+          ref={scrollViewRef}
           style={styles.scroll}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 90 }]}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 110 }]}
+          keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
           {/* Media Preview Card (unified photo & video keyframe preview) */}
@@ -507,7 +516,7 @@ export function TagReviewScreen({
           <View style={styles.card}>
             <View style={styles.inputHeader}>
               <MaterialCommunityIcons name="floor-plan" size={16} color="#004e58" />
-              <Text style={styles.inputTitle}>Phạm vi khu vực (AccessScope)</Text>
+              <Text style={styles.inputTitle}>Phạm vi khu vực</Text>
             </View>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
               {(
@@ -566,6 +575,7 @@ export function TagReviewScreen({
               style={[styles.textInput, { marginTop: 8, minHeight: 44 }]}
               value={scopeLabelStr}
               onChangeText={setScopeLabelStr}
+              onFocus={scrollToBottomOnFocus}
               placeholder="Nhãn khu vực (VD: Cổng chính, Tầng trệt...)"
               placeholderTextColor="#94a3b8"
               accessibilityLabel="Nhãn phạm vi khu vực"
@@ -582,6 +592,7 @@ export function TagReviewScreen({
               style={styles.textInput}
               value={notes}
               onChangeText={setNotes}
+              onFocus={scrollToBottomOnFocus}
               placeholder="Ví dụ: Dốc ở cửa bên phải, bề mặt chống trượt, cửa tự động..."
               placeholderTextColor="#94a3b8"
               multiline

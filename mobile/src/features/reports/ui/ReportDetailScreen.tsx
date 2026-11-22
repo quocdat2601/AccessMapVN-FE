@@ -149,7 +149,14 @@ export function ReportDetailScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <TouchableOpacity accessibilityLabel="Quay lại" onPress={() => router.back()} style={styles.iconButton}>
+        <TouchableOpacity
+          accessibilityLabel="Quay lại"
+          onPress={() => {
+            if (router.canGoBack()) router.back();
+            else router.replace('/map');
+          }}
+          style={styles.iconButton}
+        >
           <MaterialCommunityIcons name="arrow-left" size={22} color="#334155" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Chi tiết báo cáo</Text>

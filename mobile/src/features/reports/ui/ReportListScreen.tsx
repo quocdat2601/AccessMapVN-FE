@@ -75,7 +75,13 @@ export function ReportListScreen() {
         <TouchableOpacity onPress={() => router.push('/login')} style={styles.primaryButton}>
           <Text style={styles.primaryButtonText}>Đăng nhập</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => router.back()} style={styles.secondaryButton}>
+        <TouchableOpacity
+          onPress={() => {
+            if (router.canGoBack()) router.back();
+            else router.replace('/map');
+          }}
+          style={styles.secondaryButton}
+        >
           <Text style={styles.secondaryButtonText}>Quay lại</Text>
         </TouchableOpacity>
       </SafeAreaView>
@@ -85,7 +91,14 @@ export function ReportListScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <View style={styles.header}>
-        <TouchableOpacity accessibilityLabel="Quay lại" onPress={() => router.back()} style={styles.iconButton}>
+        <TouchableOpacity
+          accessibilityLabel="Quay lại"
+          onPress={() => {
+            if (router.canGoBack()) router.back();
+            else router.replace('/map');
+          }}
+          style={styles.iconButton}
+        >
           <MaterialCommunityIcons name="arrow-left" size={22} color="#334155" />
         </TouchableOpacity>
         <View style={styles.headerCopy}>

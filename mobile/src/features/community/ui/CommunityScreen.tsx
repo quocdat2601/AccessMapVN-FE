@@ -39,9 +39,11 @@ export function CommunityScreen({ hideBottomNav = false }: CommunityScreenProps 
             <View style={styles.brandIconCircle}>
               <MaterialCommunityIcons name="trophy-award" size={20} color="#004F58" />
             </View>
-            <View>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.headerOverline}>CỘNG ĐỒNG & ĐÓNG GÓP</Text>
-              <Text style={styles.headerTitle}>Bảng Xếp Hạng Uy Tín</Text>
+              <Text style={styles.headerTitle} numberOfLines={1} adjustsFontSizeToFit>
+                Bảng Xếp Hạng Uy Tín
+              </Text>
             </View>
           </View>
 
@@ -49,6 +51,8 @@ export function CommunityScreen({ hideBottomNav = false }: CommunityScreenProps 
             <TouchableOpacity
               style={styles.actionPill}
               onPress={() => setShowHistory(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Lịch sử đóng góp"
               activeOpacity={0.78}
             >
               <MaterialCommunityIcons name="history" size={16} color="#004F58" />
@@ -57,6 +61,7 @@ export function CommunityScreen({ hideBottomNav = false }: CommunityScreenProps 
             <TouchableOpacity
               style={styles.iconCircleBtn}
               onPress={() => router.push('/reports' as any)}
+              accessibilityRole="button"
               accessibilityLabel="Lịch sử báo cáo"
               activeOpacity={0.78}
             >
@@ -95,9 +100,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
     minHeight: 48,
   },
   brandRow: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
@@ -117,7 +125,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
     color: '#0F172A',
   },
