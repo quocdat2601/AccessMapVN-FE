@@ -43,6 +43,7 @@ interface MapViewProps {
   userLongitude: number | null;
   initialRegion: MapRegion;
   onRegionDidChange?: (feature: any) => void;
+  onHeadingChange?: (heading: number) => void;
   onSelectPlace?: (placeId: string | null, place?: PlaceDto | null) => void;
   onSelectOsmPlace?: (place: PlaceDto | null) => void;
   selectedPlaceId?: string | null;
@@ -127,6 +128,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   userLongitude,
   initialRegion,
   onRegionDidChange,
+  onHeadingChange,
   onSelectPlace,
   onSelectOsmPlace,
   selectedPlaceId,
@@ -136,6 +138,29 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const cameraRef = useRef<any>(null);
   const mapRef = useRef<any>(null);
   const [activeTapPoint, setActiveTapPoint] = useState<{ lng: number; lat: number; name?: string } | null>(null);
+
+  const extractBearing = (event: any): number => {
+    const raw =
+      event?.nativeEvent?.bearing ??
+      event?.bearing ??
+      event?.nativeEvent?.properties?.bearing ??
+      event?.properties?.bearing ??
+      event?.nativeEvent?.properties?.heading ??
+      event?.properties?.heading ??
+      event?.heading ??
+      0;
+    let b = Number(raw);
+    if (isNaN(b)) return 0;
+    while (b > 180) b -= 360;
+    while (b <= -180) b += 360;
+    return Math.round(b);
+  };
+
+  const handleRegionChange = (event: any) => {
+    const b = extractBearing(event);
+    onHeadingChange?.(b);
+    onRegionDidChange?.(event);
+  };
 
   const flyToPlace = (lng: number, lat: number, zoom = 16) => {
     // Offset south so marker is centered in the visible viewport between search bar and bottom sheet
@@ -159,7 +184,7 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       try {
         const zoom = await mapRef.current?.getZoom();
         if (typeof zoom === 'number') {
-          cameraRef.current?.zoomTo(Math.min(zoom + 1, 20), 300);
+          cameraRef.current?.zoomTo(Math.min(zoom + 1, 20), { duration: 300 });
         }
       } catch {}
     },
@@ -167,16 +192,44 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       try {
         const zoom = await mapRef.current?.getZoom();
         if (typeof zoom === 'number') {
-          cameraRef.current?.zoomTo(Math.max(zoom - 1, 3), 300);
+          cameraRef.current?.zoomTo(Math.max(zoom - 1, 3), { duration: 300 });
         }
       } catch {}
     },
-    resetNorth: () => {
+    resetNorth: async () => {
       try {
-        cameraRef.current?.setCamera({ heading: 0, animationDuration: 400 });
-      } catch {}
+        if (cameraRef.current?.setStop) {
+          await cameraRef.current.setStop({
+            bearing: 0,
+            duration: 450,
+            easing: 'ease',
+          });
+        } else {
+          const center = await mapRef.current?.getCenter();
+          if (center && cameraRef.current?.easeTo) {
+            cameraRef.current.easeTo({
+              center,
+              bearing: 0,
+              duration: 450,
+            });
+          }
+        }
+      } catch {
+        try {
+          const center = await mapRef.current?.getCenter();
+          if (center && cameraRef.current?.easeTo) {
+            cameraRef.current.easeTo({
+              center,
+              bearing: 0,
+              duration: 450,
+            });
+          }
+        } catch {}
+      } finally {
+        onHeadingChange?.(0);
+      }
     },
-  }), [userLatitude, userLongitude]);
+  }), [userLatitude, userLongitude, onHeadingChange]);
 
   const currentResolvingId = useRef<string | null>(null);
 
@@ -578,8 +631,10 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         mapStyle={DEFAULT_STYLE_URL}
         logo={false}
         attribution={false}
-        compass
-        onRegionDidChange={onRegionDidChange}
+        compass={false}
+        touchRotate={true}
+        onRegionDidChange={handleRegionChange}
+        onRegionIsChanging={handleRegionChange}
         onPress={handleMapPress}
       >
         <MapLibreGL.Camera

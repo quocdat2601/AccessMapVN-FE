@@ -94,6 +94,7 @@ export function DiscoveryScreen({
     useState<AccessibilityFilterState>(DEFAULT_ACCESSIBILITY_FILTERS);
   const [showAccessibilityModal, setShowAccessibilityModal] = useState<boolean>(false);
   const [showLegend, setShowLegend] = useState<boolean>(false);
+  const [mapHeading, setMapHeading] = useState<number>(0);
   const [isSavingPrefs, setIsSavingPrefs] = useState<boolean>(false);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
 
@@ -301,6 +302,7 @@ export function DiscoveryScreen({
         userLongitude={location?.longitude ?? null}
         initialRegion={initialRegion}
         onRegionDidChange={onRegionDidChange}
+        onHeadingChange={setMapHeading}
         onSelectPlace={(id, place) => {
           setOsmPlace(place ?? null);
           selectPlace(id);
@@ -467,6 +469,7 @@ export function DiscoveryScreen({
       </View>
 
       <MapControls
+        heading={mapHeading}
         onMyLocation={() => mapViewRef.current?.recenter()}
         onResetNorth={() => mapViewRef.current?.resetNorth()}
         onZoomIn={() => mapViewRef.current?.zoomIn()}

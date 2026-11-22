@@ -362,6 +362,7 @@ export function LeaderboardContent({ isGuest, onStartContribution }: Leaderboard
   const [myRep, setMyRep] = useState<MyReputationResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isPolicyExpanded, setIsPolicyExpanded] = useState(false);
 
   const handleStartContribution = useCallback(() => {
     if (onStartContribution) {
@@ -493,15 +494,34 @@ export function LeaderboardContent({ isGuest, onStartContribution }: Leaderboard
         />
       }
     >
-      {/* Policy Card Banner */}
+      {/* Policy Card Banner (Collapsible) */}
       <View style={styles.policyCard}>
-        <View style={styles.policyHeaderRow}>
-          <MaterialCommunityIcons name="shield-star-outline" size={18} color="#006874" />
-          <Text style={styles.policyTitle}>Quy tắc cộng điểm uy tín & Kiểm định</Text>
-        </View>
-        <Text style={styles.policyLine}>• +5 điểm uy tín: Đóng góp địa điểm tiếp cận mới được công bố.</Text>
-        <Text style={styles.policyLine}>• +2 điểm uy tín: Bổ sung tiện ích mới tại địa điểm sau 30 ngày.</Text>
-        <Text style={styles.policyLine}>• Hệ số tin cậy 1.5x khi đạt từ 50 điểm uy tín (Trusted Member).</Text>
+        <TouchableOpacity
+          style={styles.policyHeaderRow}
+          onPress={() => setIsPolicyExpanded((prev) => !prev)}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Quy tắc cộng điểm uy tín & Kiểm định"
+          accessibilityState={{ expanded: isPolicyExpanded }}
+        >
+          <View style={styles.policyHeaderLeft}>
+            <MaterialCommunityIcons name="shield-star-outline" size={18} color="#006874" />
+            <Text style={styles.policyTitle}>Quy tắc cộng điểm uy tín & Kiểm định</Text>
+          </View>
+          <Ionicons
+            name={isPolicyExpanded ? 'chevron-up' : 'chevron-down'}
+            size={18}
+            color="#006874"
+          />
+        </TouchableOpacity>
+
+        {isPolicyExpanded && (
+          <View style={styles.policyBody}>
+            <Text style={styles.policyLine}>• +5 điểm uy tín: Đóng góp địa điểm tiếp cận mới được công bố.</Text>
+            <Text style={styles.policyLine}>• +2 điểm uy tín: Bổ sung tiện ích mới tại địa điểm sau 30 ngày.</Text>
+            <Text style={styles.policyLine}>• Hệ số tin cậy 1.5x khi đạt từ 50 điểm uy tín (Trusted Member).</Text>
+          </View>
+        )}
       </View>
 
       {/* Personal Rank Card */}
@@ -666,17 +686,34 @@ const styles = StyleSheet.create({
   closeBtn: { padding: 6, borderRadius: 16, backgroundColor: '#F1F5F9' },
   content: { padding: 16, gap: 16, paddingBottom: 36 },
 
-  /* Policy Card */
+  /* Policy Card (Collapsible) */
   policyCard: {
     backgroundColor: '#F0FDFA',
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#99F6E4',
-    padding: 14,
-    gap: 5,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
-  policyHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
-  policyTitle: { fontSize: 13.5, fontWeight: '800', color: '#004F58' },
+  policyHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  policyHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    flex: 1,
+  },
+  policyTitle: { fontSize: 13, fontWeight: '800', color: '#004F58' },
+  policyBody: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#CCFBF1',
+    gap: 4,
+  },
   policyLine: { fontSize: 12.5, color: '#134E4A', lineHeight: 18 },
 
   /* Personal Rank Card */
@@ -718,7 +755,7 @@ const styles = StyleSheet.create({
   /* Skeleton Shimmer */
   skeletonContainer: { gap: 16, paddingVertical: 8 },
   skeletonPolicyCard: {
-    height: 80,
+    height: 46,
     backgroundColor: '#E2E8F0',
     borderRadius: 16,
   },

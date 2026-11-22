@@ -6,6 +6,8 @@ import { Colors } from '@/shared/theme';
 
 interface MapControlsProps {
   onResetNorth?: () => void;
+  heading?: number;
+  showCompassAlways?: boolean;
   onToggleLayer?: () => void;
   isLayerActive?: boolean;
   onToggleLegend?: () => void;
@@ -18,6 +20,8 @@ interface MapControlsProps {
 
 export function MapControls({
   onResetNorth,
+  heading = 0,
+  showCompassAlways = false,
   onToggleLayer,
   isLayerActive = true,
   onToggleLegend,
@@ -29,19 +33,24 @@ export function MapControls({
 }: MapControlsProps) {
   const insets = useSafeAreaInsets();
   const calculatedTop = topOffset ?? (insets.top + 190);
+  const isRotated = showCompassAlways || (typeof heading === 'number' && Math.abs(heading) > 1);
 
   return (
     <View style={[styles.container, { top: calculatedTop }]}>
-      {/* 1. Compass Button */}
-      <TouchableOpacity
-        style={styles.circleButton}
-        onPress={onResetNorth}
-        accessibilityRole="button"
-        accessibilityLabel="Khôi phục hướng Bắc"
-        activeOpacity={0.8}
-      >
-        <Ionicons name="compass-outline" size={22} color={Colors.primary} />
-      </TouchableOpacity>
+      {/* 1. Compass Button (Chỉ xuất hiện khi bản đồ bị xoay khỏi hướng Bắc) */}
+      {isRotated && (
+        <TouchableOpacity
+          style={[styles.circleButton, styles.compassButton]}
+          onPress={onResetNorth}
+          accessibilityRole="button"
+          accessibilityLabel="Khôi phục hướng Bắc"
+          activeOpacity={0.8}
+        >
+          <View style={{ transform: [{ rotate: `${-(heading ?? 0)}deg` }] }}>
+            <Ionicons name="compass" size={26} color="#DC2626" />
+          </View>
+        </TouchableOpacity>
+      )}
 
       {/* 2. Layer Toggle Button */}
       <TouchableOpacity
@@ -132,6 +141,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.16,
     shadowRadius: 6,
     elevation: 3,
+  },
+  compassButton: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FEE2E2',
+    borderWidth: 1.5,
   },
   activeLayerButton: {
     borderColor: Colors.primaryLight,
