@@ -215,7 +215,7 @@ export default function SystemSettingsPage() {
             <ShieldCheck className="size-4 text-teal-700 shrink-0" />
             <span className="font-semibold text-teal-900">Phiên bản chính sách chuẩn:</span>
             <Badge variant="neutral" className="font-mono">qcvn10-2024-accessmap-v1</Badge>
-            <Badge variant="blue">Chính sách uy tín: v3</Badge>
+            <Badge variant="blue">Chính sách điểm: v3-metrics-3</Badge>
             <Badge variant="teal">Giới hạn tỷ trọng phiếu: 60%/người</Badge>
           </div>
         </CardContent>
@@ -250,7 +250,7 @@ export default function SystemSettingsPage() {
                 onChange={(e) => setSettings({ ...settings, autoVerifyScoreThreshold: Number(e.target.value) })}
               />
               <p className="text-xs text-slate-500 mt-1">
-                Bài đóng góp đạt điểm tổng hợp từ ngưỡng này sẽ tự động xuất bản (Published) và cộng điểm thưởng.
+                Bài đóng góp đạt điểm tổng hợp từ ngưỡng này sẽ tự động xuất bản (Published) và tạo sự kiện cộng điểm uy tín &amp; danh vọng (v3-metrics-3).
               </p>
             </div>
 

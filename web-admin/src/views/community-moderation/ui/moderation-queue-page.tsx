@@ -308,7 +308,7 @@ export function ModerationQueuePage({ kind }: { kind: QueueKind }) {
 
       <div className="flex gap-2 rounded-xl border border-sky-100 bg-sky-50 p-3 text-xs leading-5 text-sky-900">
         <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-        Phiếu xác nhận và báo cáo không tự sửa dữ liệu đã công bố, AI confidence hoặc EXP.
+        Phiếu xác nhận và báo cáo không tự sửa dữ liệu đã công bố, độ tin cậy AI hoặc điểm uy tín / danh vọng.
       </div>
     </div>
   );

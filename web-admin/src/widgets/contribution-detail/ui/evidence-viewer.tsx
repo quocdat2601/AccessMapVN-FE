@@ -301,7 +301,7 @@ export function EvidenceViewer({ evidence, userClaims }: { evidence: Contributio
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={active.exifStatus === "valid" ? "teal" : "amber"}>
             <ShieldCheck className="mr-1 size-3" />
-            EXIF {active.exifStatus === "valid" ? "hợp lệ" : "cần kiểm tra"}
+            EXIF {active.exifStatus === "valid" ? "hợp lệ" : active.exifStatus === "missing" ? "thiếu GPS" : "cần kiểm tra"}
           </Badge>
           <Button
             variant={showBBoxes && activeBBoxes.length > 0 ? "default" : "outline"}
@@ -454,8 +454,8 @@ export function EvidenceViewer({ evidence, userClaims }: { evidence: Contributio
                 </span>
               ) : null}
               <span className="flex items-center gap-1">
-                <MapPinCheck className="size-3 text-teal-600" />
-                Gắn thẻ địa lý {active.geotagStatus === "valid" ? "hợp lệ" : "cần đối soát"}
+                <MapPinCheck className={active.geotagStatus === "valid" ? "size-3 text-teal-600" : "size-3 text-amber-600"} />
+                Gắn thẻ địa lý {active.geotagStatus === "valid" ? "hợp lệ" : active.geotagStatus === "missing" ? "chưa gắn thẻ EXIF" : "cần đối soát"}
               </span>
             </div>
 

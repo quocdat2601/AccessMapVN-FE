@@ -128,23 +128,20 @@ interface HeldCommunityVotePage {
   hasMore: boolean;
 }
 
-function tierFromPoints(points: number): string {
-  if (points >= 500) return "Hạng Vàng";
-  if (points >= 200) return "Trusted";
-  if (points >= 50) return "Hạng Đồng";
-  return "Baseline";
+function standingBandFromScore(score: number): string {
+  if (score >= 40) return "Bình thường";
+  if (score >= 20) return "Hạn chế";
+  return "Bị giới hạn";
 }
 
-function tierBadgeVariant(tier: string): "amber" | "teal" | "blue" | "neutral" {
-  const lower = tier.toLowerCase();
-  if (lower.includes("vàng")) return "amber";
-  if (lower.includes("trusted")) return "teal";
-  if (lower.includes("đồng")) return "blue";
-  return "neutral";
+function standingBadgeVariant(score: number): "amber" | "teal" | "blue" | "neutral" | "red" {
+  if (score >= 40) return "teal";
+  if (score >= 20) return "amber";
+  return "red";
 }
 
 function formatAccuracy(rate: number | null): string {
-  if (rate === null || !Number.isFinite(rate)) return "Chưa đánh giá";
+  if (rate === null || !Number.isFinite(rate)) return "Chưa đủ dữ liệu";
   const pct = rate <= 1 ? rate * 100 : rate;
   return `${pct.toFixed(1)}%`;
 }
@@ -229,16 +226,17 @@ export default function AdminUsersReputationPage() {
             const item = rawItem as Record<string, unknown>;
             if (typeof item.userId === "string") {
               const b = item as unknown as ContractBUserItem;
+              const standing = b.accountStandingScore ?? 50;
               return {
                 id: b.userId,
                 name: b.name,
                 email: b.email,
                 status: b.status,
                 profileVersion: b.profileVersion ?? 1,
-                accountStandingScore: b.accountStandingScore ?? 100,
+                accountStandingScore: standing,
                 contributionAccuracyRate: b.contributionAccuracyRate ?? null,
                 reputationPoints: b.reputationPoints ?? 0,
-                tierLabel: tierFromPoints(b.reputationPoints ?? 0),
+                tierLabel: standingBandFromScore(standing),
                 isLegacy: false,
               };
             }
@@ -249,10 +247,10 @@ export default function AdminUsersReputationPage() {
               email: l.role,
               status: l.isActive ? "Active" : "Disabled",
               profileVersion: 1,
-              accountStandingScore: 100,
+              accountStandingScore: 50,
               contributionAccuracyRate: null,
               reputationPoints: l.reputationScore ?? 0,
-              tierLabel: l.reputationTier || "Baseline",
+              tierLabel: standingBandFromScore(50),
               isLegacy: true,
             };
           });
@@ -610,9 +608,9 @@ export default function AdminUsersReputationPage() {
                       <tr className="border-b border-slate-200 text-xs uppercase text-slate-500">
                         <th className="py-2.5 pr-3">Thành viên</th>
                         <th className="py-2.5 px-3">Trạng thái</th>
-                        <th className="py-2.5 px-3 text-right">Điểm chấp hành</th>
-                        <th className="py-2.5 px-3 text-right">Độ chính xác</th>
-                        <th className="py-2.5 px-3 text-right">Điểm xếp hạng</th>
+                        <th className="py-2.5 px-3 text-right">Uy tín tài khoản</th>
+                        <th className="py-2.5 px-3 text-right">Độ tin cậy</th>
+                        <th className="py-2.5 px-3 text-right">Danh vọng</th>
                         <th className="py-2.5 pl-3 text-right">Thao tác</th>
                       </tr>
                     </thead>
@@ -627,15 +625,15 @@ export default function AdminUsersReputationPage() {
                           <td className="py-3 px-3">
                             <Badge variant={u.status === "Active" ? "teal" : "red"}>{u.status}</Badge>
                           </td>
-                          <td className="py-3 px-3 text-right font-semibold text-slate-800">
-                            {u.accountStandingScore}/100
+                          <td className="py-3 px-3 text-right">
+                            <div className="font-semibold text-slate-800">{u.accountStandingScore}/100</div>
+                            <Badge variant={standingBadgeVariant(u.accountStandingScore)}>{u.tierLabel}</Badge>
                           </td>
                           <td className="py-3 px-3 text-right text-slate-700">
                             {formatAccuracy(u.contributionAccuracyRate)}
                           </td>
                           <td className="py-3 px-3 text-right">
-                            <div className="font-bold text-slate-900">{u.reputationPoints}</div>
-                            <Badge variant={tierBadgeVariant(u.tierLabel)}>{u.tierLabel}</Badge>
+                            <div className="font-bold text-slate-900">{u.reputationPoints} điểm</div>
                           </td>
                           <td className="py-3 pl-3 text-right">
                             <div className="flex justify-end gap-1.5">
@@ -790,10 +788,10 @@ export default function AdminUsersReputationPage() {
                           onChange={(e) => setAdjustAction(e.target.value as typeof adjustAction)}
                           className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
                         >
-                          <option value="ConfirmViolation">Xác nhận vi phạm (Trừ điểm chấp hành)</option>
-                          <option value="ReverseStandingEffect">Hoàn điểm chấp hành</option>
-                          <option value="RevokeReward">Thu hồi điểm thưởng</option>
-                          <option value="RestoreReward">Khôi phục điểm thưởng</option>
+                          <option value="ConfirmViolation">Xác nhận vi phạm (Trừ uy tín tài khoản)</option>
+                          <option value="ReverseStandingEffect">Hoàn uy tín tài khoản</option>
+                          <option value="RevokeReward">Thu hồi điểm danh vọng</option>
+                          <option value="RestoreReward">Khôi phục điểm danh vọng</option>
                         </select>
                       </div>
                       <div>
@@ -803,8 +801,8 @@ export default function AdminUsersReputationPage() {
                           onChange={(e) => setScoreType(e.target.value as typeof scoreType)}
                           className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
                         >
-                          <option value="AccountStanding">AccountStanding</option>
-                          <option value="ReputationPoints">ReputationPoints</option>
+                          <option value="AccountStanding">AccountStanding (Uy tín 0–100)</option>
+                          <option value="ReputationPoints">ReputationPoints (Danh vọng xếp hạng)</option>
                         </select>
                       </div>
                       <div>
@@ -933,13 +931,14 @@ export default function AdminUsersReputationPage() {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-slate-900">{entry.displayName}</p>
                         <p className="text-[11px] text-slate-500">
-                          {entry.reputationTier} · {entry.contributionsCount} đóng góp
+                          {entry.rankBadge || `Top${entry.rank}`}
+                          {entry.contributionsCount > 0 ? ` · ${entry.contributionsCount} nhận định` : " · Điểm danh vọng"}
                         </p>
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-1 text-sm font-bold text-amber-700">
                       <Award className="size-3.5" />
-                      {entry.reputationScore}
+                      {entry.reputationScore} điểm
                     </div>
                   </div>
                 ))
