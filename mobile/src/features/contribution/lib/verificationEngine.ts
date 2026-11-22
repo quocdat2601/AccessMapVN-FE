@@ -409,3 +409,254 @@ export async function verifyWithAiOrFallback(
   return evaluateVerificationMatrix(input);
 }
 
+export const MIN_MEDIA_LONG_EDGE_PX = 1280;
+export const MIN_MEDIA_SHORT_EDGE_PX = 720;
+export const MAX_PHOTO_SIZE_BYTES = 10 * 1024 * 1024;
+export const MAX_VIDEO_SIZE_BYTES = 30 * 1024 * 1024;
+export const MIN_VIDEO_DURATION_SECONDS = 5;
+export const MAX_VIDEO_DURATION_SECONDS = 10;
+
+export type MediaValidationResult =
+  | { valid: true }
+  | { valid: false; code: string; message: string };
+
+export function validateCapturedMedia(media: {
+  type: 'photo' | 'video';
+  width?: number | null;
+  height?: number | null;
+  fileSize?: number | null;
+  durationSeconds?: number | null;
+}): MediaValidationResult {
+  const width = media.width;
+  const height = media.height;
+  if (width != null && height != null && width > 0 && height > 0) {
+    const longEdge = Math.max(width, height);
+    const shortEdge = Math.min(width, height);
+    if (longEdge < MIN_MEDIA_LONG_EDGE_PX || shortEdge < MIN_MEDIA_SHORT_EDGE_PX) {
+      return {
+        valid: false,
+        code: media.type === 'video' ? 'INVALID_VIDEO_RESOLUTION' : 'INVALID_PHOTO_RESOLUTION',
+        message:
+          media.type === 'video'
+            ? `Video có độ phân giải quá thấp (${Math.round(width)}×${Math.round(height)} px). Yêu cầu tối thiểu ${MIN_MEDIA_LONG_EDGE_PX}×${MIN_MEDIA_SHORT_EDGE_PX} px (720p) — vui lòng quay lại.`
+            : `Ảnh có độ phân giải quá thấp (${Math.round(width)}×${Math.round(height)} px). Yêu cầu tối thiểu ${MIN_MEDIA_LONG_EDGE_PX}×${MIN_MEDIA_SHORT_EDGE_PX} px (HD) — vui lòng chụp trực tiếp bằng camera hoặc chọn ảnh gốc nét hơn.`,
+      };
+    }
+  }
+
+  if (media.fileSize != null && media.fileSize > 0) {
+    if (media.type === 'photo' && media.fileSize > MAX_PHOTO_SIZE_BYTES) {
+      return {
+        valid: false,
+        code: 'MEDIA_TOO_LARGE',
+        message: 'Ảnh vượt quá dung lượng tối đa 10 MB. Vui lòng chụp lại ảnh nhỏ hơn.',
+      };
+    }
+    if (media.type === 'video' && media.fileSize > MAX_VIDEO_SIZE_BYTES) {
+      return {
+        valid: false,
+        code: 'MEDIA_TOO_LARGE',
+        message: 'Video vượt quá dung lượng tối đa 30 MB. Vui lòng quay video ngắn hơn.',
+      };
+    }
+  }
+
+  if (media.type === 'video' && media.durationSeconds != null) {
+    if (
+      media.durationSeconds < MIN_VIDEO_DURATION_SECONDS ||
+      media.durationSeconds > MAX_VIDEO_DURATION_SECONDS
+    ) {
+      return {
+        valid: false,
+        code: 'INVALID_VIDEO_DURATION',
+        message: `Video phải có độ dài từ ${MIN_VIDEO_DURATION_SECONDS} đến ${MAX_VIDEO_DURATION_SECONDS} giây. Vui lòng quay lại.`,
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
+export interface MappedContributionError {
+  message: string;
+  code?: string;
+  needsRetake: boolean;
+  isConflict: boolean;
+}
+
+const CONTRIBUTION_ERROR_MAP: Record<string, { message: string; needsRetake: boolean }> = {
+  INVALID_PHOTO_RESOLUTION: {
+    message:
+      'Ảnh có độ phân giải quá thấp (yêu cầu tối thiểu 1280×720 px). Vui lòng chụp trực tiếp bằng camera hoặc chọn ảnh gốc nét hơn.',
+    needsRetake: true,
+  },
+  INVALID_VIDEO_RESOLUTION: {
+    message: 'Video có độ phân giải quá thấp (yêu cầu tối thiểu 1280×720 px). Vui lòng quay lại.',
+    needsRetake: true,
+  },
+  INVALID_VIDEO_DURATION: {
+    message: 'Video cần có độ dài từ 5 đến 10 giây. Vui lòng quay lại.',
+    needsRetake: true,
+  },
+  INVALID_PHOTO_CONTENT: {
+    message: 'Tệp ảnh bị lỗi hoặc định dạng không hợp lệ (chỉ hỗ trợ JPEG/PNG). Vui lòng chụp lại ảnh.',
+    needsRetake: true,
+  },
+  INVALID_VIDEO_CONTENT: {
+    message: 'Tệp video bị lỗi hoặc codec chưa được hỗ trợ (chỉ hỗ trợ MP4 H.264). Vui lòng quay lại.',
+    needsRetake: true,
+  },
+  UNSUPPORTED_MEDIA_CONTENT_TYPE: {
+    message: 'Định dạng tệp chưa được hỗ trợ (chỉ chấp nhận ảnh JPEG/PNG hoặc video MP4). Vui lòng chụp lại.',
+    needsRetake: true,
+  },
+  MEDIA_TOO_LARGE: {
+    message: 'Tệp minh chứng vượt quá dung lượng cho phép (tối đa 10 MB cho ảnh, 30 MB cho video). Vui lòng chụp hoặc quay lại.',
+    needsRetake: true,
+  },
+  INVALID_MEDIA_SIZE: {
+    message: 'Kích thước tệp ảnh/video không khớp khi tải lên. Vui lòng chụp lại hoặc thử gửi lại.',
+    needsRetake: true,
+  },
+  MEDIA_SIZE_MISMATCH: {
+    message: 'Kích thước tệp ảnh/video không khớp khi tải lên. Vui lòng chụp lại hoặc thử gửi lại.',
+    needsRetake: true,
+  },
+  PHOTO_DECODE_RESOURCE_LIMIT: {
+    message: 'Ảnh có kích thước điểm ảnh quá lớn để xử lý. Vui lòng chụp lại ở chế độ tiêu chuẩn.',
+    needsRetake: true,
+  },
+  UPLOAD_INTENT_NOT_USABLE: {
+    message: 'Phiên tải ảnh đã hết hạn hoặc bị thay đổi. Vui lòng bấm gửi lại hoặc chụp lại ảnh.',
+    needsRetake: true,
+  },
+  UPLOAD_ORIGINAL_CHANGED: {
+    message: 'Phiên tải ảnh đã hết hạn hoặc bị thay đổi. Vui lòng bấm gửi lại hoặc chụp lại ảnh.',
+    needsRetake: true,
+  },
+  MEDIA_PREPARATION_CHANGED: {
+    message: 'Phiên tải ảnh đã hết hạn hoặc bị thay đổi. Vui lòng bấm gửi lại hoặc chụp lại ảnh.',
+    needsRetake: true,
+  },
+  INVALID_CAPTURE_GPS: {
+    message: 'Thông tin GPS hoặc thời gian chụp không hợp lệ. Vui lòng kiểm tra GPS và thử lại.',
+    needsRetake: false,
+  },
+  INVALID_CAPTURE_TIME: {
+    message: 'Thông tin GPS hoặc thời gian chụp không hợp lệ. Vui lòng kiểm tra GPS và thử lại.',
+    needsRetake: false,
+  },
+  INVALID_UPLOAD_TARGET: {
+    message: 'Thông tin địa điểm hoặc phạm vi khảo sát chưa hợp lệ. Vui lòng chọn lại địa điểm.',
+    needsRetake: false,
+  },
+  INVALID_SCOPE_SELECTOR: {
+    message: 'Thông tin địa điểm hoặc phạm vi khảo sát chưa hợp lệ. Vui lòng chọn lại địa điểm.',
+    needsRetake: false,
+  },
+  PHOTO_INSPECTION_TIMEOUT: {
+    message: 'Quá thời gian kiểm tra tệp minh chứng. Vui lòng thử gửi lại sau giây lát.',
+    needsRetake: false,
+  },
+  VIDEO_INSPECTION_TIMEOUT: {
+    message: 'Quá thời gian kiểm tra tệp minh chứng. Vui lòng thử gửi lại sau giây lát.',
+    needsRetake: false,
+  },
+  MEDIA_PREPARATION_TIMEOUT: {
+    message: 'Quá thời gian kiểm tra tệp minh chứng. Vui lòng thử gửi lại sau giây lát.',
+    needsRetake: false,
+  },
+  PHOTO_INSPECTION_UNAVAILABLE: {
+    message: 'Dịch vụ kiểm tra ảnh/video đang tạm bận. Vui lòng thử lại sau.',
+    needsRetake: false,
+  },
+  VIDEO_INSPECTION_UNAVAILABLE: {
+    message: 'Dịch vụ kiểm tra ảnh/video đang tạm bận. Vui lòng thử lại sau.',
+    needsRetake: false,
+  },
+  MEDIA_PREPARATION_UNAVAILABLE: {
+    message: 'Dịch vụ kiểm tra ảnh/video đang tạm bận. Vui lòng thử lại sau.',
+    needsRetake: false,
+  },
+  PHOTO_INSPECTOR_NOT_CONFIGURED: {
+    message: 'Dịch vụ kiểm tra ảnh/video đang tạm bận. Vui lòng thử lại sau.',
+    needsRetake: false,
+  },
+  SESSION_REVOKED: {
+    message: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để tiếp tục gửi hồ sơ.',
+    needsRetake: false,
+  },
+};
+
+export function mapContributionError(err: unknown): MappedContributionError {
+  const obj = err && typeof err === 'object' ? (err as Record<string, unknown>) : null;
+  const data = obj?.data && typeof obj.data === 'object' ? (obj.data as Record<string, unknown>) : null;
+  const status = obj?.status ?? obj?.statusCode ?? data?.status ?? data?.statusCode;
+  const isConflict = status === 409;
+
+  let code: string | undefined;
+  if (typeof obj?.code === 'string' && obj.code.trim()) {
+    code = obj.code.trim();
+  } else if (typeof data?.code === 'string' && data.code.trim()) {
+    code = data.code.trim();
+  } else {
+    const rawMessages = [data?.message, obj?.message].filter(
+      (v): v is string => typeof v === 'string' && v.trim().length > 0
+    );
+    for (const msg of rawMessages) {
+      const trimmed = msg.trim();
+      if (/^[A-Z][A-Z0-9_]{2,}$/.test(trimmed)) {
+        code = trimmed;
+        break;
+      }
+      const tokens = trimmed.match(/\b[A-Z][A-Z0-9_]{2,}\b/g);
+      const matched = tokens?.find((token) => token in CONTRIBUTION_ERROR_MAP);
+      if (matched) {
+        code = matched;
+        break;
+      }
+    }
+  }
+
+  if (code && code in CONTRIBUTION_ERROR_MAP) {
+    const mapped = CONTRIBUTION_ERROR_MAP[code];
+    return {
+      message: mapped.message,
+      code,
+      needsRetake: mapped.needsRetake,
+      isConflict,
+    };
+  }
+
+  const errorsObj =
+    data?.errors && typeof data.errors === 'object' ? (data.errors as Record<string, unknown>) : null;
+  const gpsErr = Array.isArray(errorsObj?.GpsLat) ? errorsObj.GpsLat[0] : undefined;
+  const locErr = Array.isArray(errorsObj?.LocationId) ? errorsObj.LocationId[0] : undefined;
+  let errorMsg =
+    (typeof gpsErr === 'string' ? gpsErr : undefined) ||
+    (typeof locErr === 'string' ? locErr : undefined) ||
+    (typeof data?.title === 'string' ? data.title : undefined);
+
+  if (!errorMsg && data?.details && typeof data.details === 'object') {
+    const detailValues = Object.values(data.details as Record<string, unknown>)
+      .flat()
+      .filter(Boolean);
+    if (detailValues.length > 0) {
+      errorMsg = detailValues.join(', ');
+    }
+  }
+
+  const fallbackMessage =
+    errorMsg ||
+    (typeof data?.message === 'string' ? data.message : undefined) ||
+    (typeof obj?.message === 'string' ? obj.message : undefined) ||
+    'Không thể gửi đóng góp lên máy chủ. Vui lòng thử lại.';
+
+  return {
+    message: fallbackMessage,
+    code,
+    needsRetake: false,
+    isConflict,
+  };
+}
+

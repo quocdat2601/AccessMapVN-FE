@@ -16,11 +16,25 @@ export interface PreScanResult {
   summary: string;
   isMockFallback?: boolean;
   previewFrameUri?: string | null;
+  mediaWidth?: number;
+  mediaHeight?: number;
+  isBlur?: boolean;
+  laplacianVariance?: number;
+  qualityCodes?: string[];
+  qualityWarning?: string | null;
 }
 
 interface AiPreScanPayload {
   features?: Record<string, { value?: boolean | string; detected?: boolean; confidence?: number; reason?: string }>;
   summary?: string;
+  media_results?: {
+    width?: number;
+    height?: number;
+    is_blur?: boolean;
+    laplacian_variance?: number;
+    quality_codes?: string[];
+    action?: string;
+  }[];
 }
 
 interface AiVideoSuggestionPayload {
@@ -116,10 +130,32 @@ export async function runAiPreScan(imageUri: string, textDescription?: string): 
       };
     });
 
+    const firstMedia = Array.isArray(data.media_results) ? data.media_results[0] : undefined;
+    const qualityCodes = Array.isArray(firstMedia?.quality_codes)
+      ? firstMedia.quality_codes.map(String)
+      : [];
+    const isBlur = firstMedia?.is_blur === true || qualityCodes.includes('IMAGE_BLURRY');
+    let qualityWarning: string | null = null;
+    if (isBlur) {
+      qualityWarning =
+        'Ảnh hơi mờ hoặc rung tay — nên chụp lại rõ nét hơn để tránh bị từ chối khi duyệt.';
+    } else if (qualityCodes.includes('IMAGE_TOO_DARK')) {
+      qualityWarning = 'Ảnh hơi tối — nên bật đèn flash hoặc chụp ở góc đủ sáng hơn.';
+    } else if (qualityCodes.includes('IMAGE_OVEREXPOSED')) {
+      qualityWarning = 'Ảnh bị lóa/cháy sáng — nên đổi góc chụp để thấy rõ lối vào.';
+    }
+
     return {
       features,
       summary: data.summary || 'AI đã phân tích ảnh xong.',
       isMockFallback: false,
+      mediaWidth: typeof firstMedia?.width === 'number' ? firstMedia.width : undefined,
+      mediaHeight: typeof firstMedia?.height === 'number' ? firstMedia.height : undefined,
+      isBlur: typeof firstMedia?.is_blur === 'boolean' ? firstMedia.is_blur : undefined,
+      laplacianVariance:
+        typeof firstMedia?.laplacian_variance === 'number' ? firstMedia.laplacian_variance : undefined,
+      qualityCodes,
+      qualityWarning,
     };
   } catch (error) {
     console.warn('[runAiPreScan] FAILED:', error);

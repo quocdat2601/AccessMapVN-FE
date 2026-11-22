@@ -6,6 +6,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  StatusBar as RNStatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -15,6 +16,7 @@ import { Image } from 'expo-image';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAccessibility } from '@/features/accessibility';
 import type { CapturedContributionMedia } from '@/entities/contribution';
 import type { PreScanFeatureTag } from '../../api/aiPreScanService';
 import type { ProposedUploadScope } from '../../api/mediaUploadService';
@@ -40,6 +42,7 @@ interface TagReviewScreenProps {
   previewFrameUri?: string | null;
   availableTags: PreScanFeatureTag[];
   aiSummary: string | null;
+  qualityWarning?: string | null;
   isPreScanning: boolean;
   locationName?: string;
   locationAddress?: string | null;
@@ -85,6 +88,7 @@ export function TagReviewScreen({
   previewFrameUri,
   availableTags,
   aiSummary,
+  qualityWarning,
   isPreScanning,
   locationName,
   locationAddress,
@@ -96,6 +100,13 @@ export function TagReviewScreen({
   onBack,
 }: TagReviewScreenProps) {
   const insets = useSafeAreaInsets();
+  const { settings } = useAccessibility();
+  const safeTop = Math.max(
+    insets.top,
+    Platform.OS === 'android' ? (RNStatusBar.currentHeight ?? 28) : 0,
+    16
+  );
+  const safeBottom = Math.max(insets.bottom, 16);
   const scrollViewRef = useRef<ScrollView>(null);
   const scrollToBottomOnFocus = () => {
     setTimeout(() => {
@@ -227,7 +238,7 @@ export function TagReviewScreen({
   };
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={[styles.container, { paddingTop: safeTop }]}>
       <StatusBar style="dark" />
 
       {/* Navigation Header */}
@@ -343,6 +354,26 @@ export function TagReviewScreen({
               ) : null}
             </View>
           </View>
+
+          {!isPreScanning && qualityWarning ? (
+            <View style={styles.qualityWarningBanner}>
+              <View style={styles.qualityWarningHeader}>
+                <MaterialCommunityIcons name="alert-circle-outline" size={18} color="#b45309" />
+                <Text style={styles.qualityWarningTitle}>Cảnh báo chất lượng ảnh (Pre-scan)</Text>
+              </View>
+              <Text style={styles.qualityWarningBody}>{qualityWarning}</Text>
+              <Pressable
+                style={({ pressed }) => [styles.qualityRetakeBtn, pressed && styles.pressed]}
+                onPress={onRetake}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="Chụp lại ảnh rõ nét hơn"
+              >
+                <MaterialCommunityIcons name="camera-retake-outline" size={16} color="#92400e" />
+                <Text style={styles.qualityRetakeText}>Chụp lại ảnh</Text>
+              </Pressable>
+            </View>
+          ) : null}
 
           {/* AI Suggestions Summary */}
           <View style={styles.aiBanner}>
@@ -602,11 +633,11 @@ export function TagReviewScreen({
             />
           </View>
 
-          {/* EXP Reward Info */}
+          {/* Reputation Reward Info */}
           <View style={styles.expInfoRow}>
             <MaterialCommunityIcons name="star-circle" size={16} color="#d97706" />
             <Text style={styles.expInfoText}>
-              +50 EXP sau khi thông tin được duyệt
+              +2 đến +5 điểm danh vọng & +2 uy tín sau khi duyệt
             </Text>
           </View>
         </ScrollView>
@@ -642,16 +673,17 @@ export function TagReviewScreen({
       {previewImageUri ? (
         <Modal
           visible={showFullPreview}
-          transparent
-          animationType="fade"
+          transparent={false}
+          animationType={settings.reduceMotion ? 'none' : 'fade'}
           statusBarTranslucent
           onRequestClose={() => setShowFullPreview(false)}
         >
           <View style={styles.fullPreviewBackdrop}>
+            <StatusBar style="light" />
             <View
               style={[
                 styles.fullPreviewHeader,
-                { paddingTop: Math.max(insets.top, 16) + 8 },
+                { paddingTop: safeTop + 12 },
               ]}
             >
               <View style={styles.fullPreviewTitleWrap}>
@@ -670,6 +702,7 @@ export function TagReviewScreen({
                   pressed && styles.pressed,
                 ]}
                 onPress={() => setShowFullPreview(false)}
+                hitSlop={8}
                 accessibilityRole="button"
                 accessibilityLabel="Đóng xem toàn màn hình"
               >
@@ -693,7 +726,7 @@ export function TagReviewScreen({
             <View
               style={[
                 styles.fullPreviewFooter,
-                { paddingBottom: Math.max(insets.bottom, 16) + 8 },
+                { paddingBottom: safeBottom + 8 },
               ]}
             >
               <Text style={styles.fullPreviewHint}>
@@ -872,6 +905,49 @@ const styles = StyleSheet.create({
     borderColor: '#ccfbf1',
     padding: 12,
     gap: 5,
+  },
+  qualityWarningBanner: {
+    backgroundColor: '#fffbeb',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#fde68a',
+    padding: 12,
+    gap: 6,
+  },
+  qualityWarningHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  qualityWarningTitle: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#92400e',
+  },
+  qualityWarningBody: {
+    fontSize: 12,
+    color: '#78350f',
+    lineHeight: 18,
+  },
+  qualityRetakeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#fef3c7',
+    borderWidth: 1,
+    borderColor: '#fcd34d',
+    marginTop: 2,
+  },
+  qualityRetakeText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#92400e',
   },
   aiBannerHeader: {
     flexDirection: 'row',
@@ -1071,7 +1147,7 @@ const styles = StyleSheet.create({
   },
   fullPreviewBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(2, 6, 23, 0.96)',
+    backgroundColor: '#020617',
   },
   fullPreviewHeader: {
     flexDirection: 'row',
@@ -1108,6 +1184,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   fullPreviewImage: {
     width: '100%',

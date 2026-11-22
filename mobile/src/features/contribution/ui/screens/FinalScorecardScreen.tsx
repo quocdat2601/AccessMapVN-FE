@@ -1,11 +1,19 @@
 import React, { useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, AppState, Easing, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ContributionHistorySheet, addContributionRecord, type CapturedContributionMedia } from '@/entities/contribution';
+import {
+  ContributionHistorySheet,
+  addContributionRecord,
+  fetchSubmissionStatus,
+  isTerminalSubmissionStatus,
+  updateContributionRecordStatus,
+  type CapturedContributionMedia,
+  type LiveSubmissionStatus,
+} from '@/entities/contribution';
 import { QCVN_FEATURE_TAGS } from '../../model/tagReviewModel';
-import { apiClient } from '@/shared/api/client';
+import { ApiError, apiClient } from '@/shared/api/client';
 import {
   submitContributionToBackend,
   uploadMediaToBackend,
@@ -13,7 +21,7 @@ import {
   type IdentityConfirmationInput,
   type ProposedUploadScope,
 } from '../../api/mediaUploadService';
-import type { VerificationMatrixResult } from '../../lib/verificationEngine';
+import { mapContributionError, type VerificationMatrixResult } from '../../lib/verificationEngine';
 import { ScoreMatrixBreakdown } from '../components/review/ScoreMatrixBreakdown';
 import { ScoreMeterRing } from '../components/review/ScoreMeterRing';
 import {
@@ -41,6 +49,7 @@ interface FinalScorecardScreenProps {
   notes: string;
   userMeasurements?: UserMeasurementsInput | null;
   proposedScope?: ProposedUploadScope;
+  qualityWarning?: string | null;
   flow?: string;
   locationName?: string;
   locationAddress?: string | null;
@@ -72,6 +81,7 @@ export function FinalScorecardScreen({
   notes,
   userMeasurements,
   proposedScope,
+  qualityWarning,
   flow,
   locationName,
   locationAddress,
@@ -90,7 +100,7 @@ export function FinalScorecardScreen({
   const contentOpacity = useRef(new Animated.Value(0)).current;
   const contentTranslateY = useRef(new Animated.Value(12)).current;
 
-  const { user } = useAuth();
+  const { refreshProfile, user } = useAuth();
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showHistorySheet, setShowHistorySheet] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -110,8 +120,65 @@ export function FinalScorecardScreen({
     message: string;
     pointsAwarded: number;
   } | null>(null);
+  const [liveStatus, setLiveStatus] = useState<LiveSubmissionStatus | null>(null);
+  const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
+  const isMountedRef = useRef(true);
+  React.useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const submittedId = submittedResult?.submissionId ?? null;
+  const refreshSubmissionStatus = React.useCallback(async () => {
+    if (!submittedId) return;
+    if (isMountedRef.current) setIsRefreshingStatus(true);
+    try {
+      const latest = await fetchSubmissionStatus(submittedId);
+      if (!latest || !isMountedRef.current) return;
+      setLiveStatus(latest);
+      updateContributionRecordStatus(submittedId, {
+        status: latest.status,
+        submissionCode: latest.submissionCode,
+        revision: latest.revision,
+        resubmissionCount: latest.resubmissionCount,
+        moderatorNote: latest.informationRequestReason ?? undefined,
+      });
+      if (latest.status === 'Published' || latest.status === 'Auto-Verified') {
+        void refreshProfile();
+      }
+    } finally {
+      if (isMountedRef.current) setIsRefreshingStatus(false);
+    }
+  }, [submittedId, refreshProfile]);
+
+  const liveStatusValue = liveStatus?.status;
+  React.useEffect(() => {
+    if (!submittedId) return;
+    void refreshSubmissionStatus();
+
+    const shouldPoll =
+      !isTerminalSubmissionStatus(liveStatusValue) && liveStatusValue !== 'AwaitingMoreInfo';
+    const timer = shouldPoll
+      ? setInterval(() => {
+          void refreshSubmissionStatus();
+        }, 5000)
+      : null;
+
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        void refreshSubmissionStatus();
+      }
+    });
+
+    return () => {
+      if (timer) clearInterval(timer);
+      subscription.remove();
+    };
+  }, [submittedId, liveStatusValue, refreshSubmissionStatus]);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isConflictError, setIsConflictError] = useState(false);
+  const [needsRetakeOnError, setNeedsRetakeOnError] = useState(false);
   const [duplicateChallenge, setDuplicateChallenge] = useState<DuplicateLocationChallenge | null>(null);
   const [confirmDistinctReason, setConfirmDistinctReason] = useState('');
   const [resolvedLocationIdOverride, setResolvedLocationIdOverride] = useState<string | null>(null);
@@ -144,6 +211,15 @@ export function FinalScorecardScreen({
     void syncDraft();
   }, [media.locationId]);
 
+  React.useEffect(() => {
+    if (flow !== 'report') {
+      badgeScale.setValue(1);
+      badgeOpacity.setValue(1);
+      contentOpacity.setValue(1);
+      contentTranslateY.setValue(0);
+    }
+  }, [flow, badgeScale, badgeOpacity, contentOpacity, contentTranslateY]);
+
   // Keep draft updated when tags or notes change
   React.useEffect(() => {
     if (!media.locationId) return;
@@ -161,6 +237,7 @@ export function FinalScorecardScreen({
   const handleResetSubmissionId = async () => {
     clientSubmissionIdRef.current = `mob-${Date.now().toString(36)}-${Math.random().toString(36).substring(2, 9)}`;
     setIsConflictError(false);
+    setNeedsRetakeOnError(false);
     setSubmitError(null);
     if (media.locationId) {
       await saveSurveyDraft({
@@ -191,6 +268,7 @@ export function FinalScorecardScreen({
     setIsSubmitting(true);
     setSubmitError(null);
     setIsConflictError(false);
+    setNeedsRetakeOnError(false);
     try {
       if (media.uri) {
         const fileExists = await defaultFileExistenceChecker(media.uri);
@@ -225,6 +303,12 @@ export function FinalScorecardScreen({
             proposedScope,
           });
         } catch (uploadErr) {
+          if (
+            uploadErr instanceof ApiError &&
+            (uploadErr.status === 401 || uploadErr.status === 413 || uploadErr.status === 422)
+          ) {
+            throw uploadErr;
+          }
           console.warn('Could not upload media to server, using local uri fallback', uploadErr);
         }
       }
@@ -296,42 +380,29 @@ export function FinalScorecardScreen({
           id: res.submission_id,
           locationId: effectiveLocationId,
           locationName: media.locationName,
-          mediaUri: uploadedUrl,
+          mediaUri: media.uri || uploadedUrl,
           mediaType: media.type,
           featureTags: selectedTagKeys,
           textDescription: notes,
           gps: media.gps ? { latitude: media.gps.latitude, longitude: media.gps.longitude } : null,
-          status: 'Pending Moderation',
+          status: 'Submitted',
           confidenceScore: overallScore / 100,
           pointsAwarded: res.points_awarded ?? 0,
           createdAt: Date.now(),
         });
 
+        setLiveStatus(null);
         setSubmittedResult({
           submissionId: res.submission_id,
-          message: res.message || 'Hồ sơ đã được tiếp nhận. EXP sẽ được tính sau khi khảo sát được duyệt.',
+          message: res.message || 'Hồ sơ đã được tiếp nhận. Điểm danh vọng và uy tín sẽ được cộng sau khi kiểm duyệt viên phê duyệt.',
           pointsAwarded: res.points_awarded ?? 0,
         });
       }
-    } catch (err: any) {
-      const is409 = err?.status === 409 || err?.statusCode === 409 || err?.data?.status === 409 || err?.data?.statusCode === 409;
-      setIsConflictError(Boolean(is409));
-
-      let errorMsg =
-        err?.data?.errors?.GpsLat?.[0] ||
-        err?.data?.errors?.LocationId?.[0] ||
-        err?.data?.title;
-
-      if (!errorMsg && err?.data?.details && typeof err.data.details === 'object') {
-        const detailValues = Object.values(err.data.details)
-          .flat()
-          .filter(Boolean);
-        if (detailValues.length > 0) {
-          errorMsg = detailValues.join(', ');
-        }
-      }
-
-      setSubmitError(errorMsg || err?.data?.message || err?.message || 'Không thể gửi đóng góp lên máy chủ. Vui lòng thử lại.');
+    } catch (err: unknown) {
+      const mapped = mapContributionError(err);
+      setIsConflictError(mapped.isConflict);
+      setNeedsRetakeOnError(mapped.needsRetake);
+      setSubmitError(mapped.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -498,150 +569,381 @@ export function FinalScorecardScreen({
         showsVerticalScrollIndicator={false}
       >
         {submittedResult ? (
-          <>
-            {/* Dedicated Post-Submit Receipt Hero */}
-            <View style={styles.receiptHeroCard}>
-              <View style={styles.receiptIconWrap}>
-                <MaterialCommunityIcons name="check-decagram" size={38} color="#059669" />
-              </View>
-              <Text style={styles.receiptTitle}>Đã gửi đóng góp thành công</Text>
-              <Text style={styles.receiptSubtitle}>
-                Cảm ơn bạn đã đóng góp dữ liệu tiếp cận cho cộng đồng.
-              </Text>
-              <View style={styles.receiptCodePill}>
-                <MaterialCommunityIcons name="identifier" size={14} color="#004e58" />
-                <Text style={styles.receiptCodeText}>Mã hồ sơ: {submittedResult.submissionId}</Text>
-              </View>
-            </View>
+          (() => {
+            const effectiveStatus = liveStatus?.status ?? 'Submitted';
+            const isPublished =
+              effectiveStatus === 'Published' || effectiveStatus === 'Auto-Verified';
+            const isAwaitingMoreInfo =
+              effectiveStatus === 'AwaitingMoreInfo' || effectiveStatus === 'NeedsSupplement';
+            const isRejected =
+              effectiveStatus === 'Rejected' || effectiveStatus === 'Cancelled';
+            const isPendingModeration =
+              effectiveStatus === 'PendingModeration' || effectiveStatus === 'Pending Moderation';
 
-            {/* Open Contribution History Sheet */}
-            <Pressable
-              style={({ pressed }) => [styles.historyLinkCard, pressed && styles.pressed]}
-              onPress={() => setShowHistorySheet(true)}
-              accessibilityRole="button"
-              accessibilityLabel="Theo dõi trạng thái hồ sơ"
-            >
-              <View style={styles.historyLinkIconWrap}>
-                <MaterialCommunityIcons name="clipboard-text-clock-outline" size={20} color="#004e58" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.historyLinkTitle}>Theo dõi trạng thái hồ sơ</Text>
-                <Text style={styles.historyLinkSub}>
-                  Xem tiến độ duyệt hoặc bổ sung ảnh nếu cần
-                </Text>
-              </View>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="#64748b" />
-            </Pressable>
+            let heroBorderColor = '#a7f3d0';
+            let heroIconBg = '#ecfdf5';
+            let heroIconName: React.ComponentProps<typeof MaterialCommunityIcons>['name'] =
+              'check-decagram';
+            let heroIconColor = '#059669';
+            let heroTitle = 'Đã gửi đóng góp thành công';
+            let heroSubtitle = 'Cảm ơn bạn đã đóng góp dữ liệu tiếp cận cho cộng đồng.';
 
-            {/* Location & Confirmed Features */}
-            <View style={styles.detailsCard}>
-              <Text style={styles.detailsTitle}>Thông tin đã ghi nhận</Text>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Địa điểm:</Text>
-                <Text style={styles.detailValue} numberOfLines={1}>
-                  {locationName || media.locationName}
-                </Text>
-              </View>
-              {selectedTagLabels.length > 0 ? (
-                <View style={styles.tagChipsSection}>
-                  <Text style={styles.detailLabel}>Đặc điểm xác nhận ({selectedTagLabels.length}):</Text>
-                  <View style={styles.tagChipsWrap}>
-                    {selectedTagLabels.map((label) => (
-                      <View key={label} style={styles.featureChip}>
-                        <MaterialCommunityIcons name="check" size={12} color="#004e58" />
-                        <Text style={styles.featureChipText}>{label}</Text>
-                      </View>
-                    ))}
+            if (isPublished) {
+              heroBorderColor = '#6ee7b7';
+              heroIconBg = '#d1fae5';
+              heroIconName = 'shield-check';
+              heroIconColor = '#047857';
+              heroTitle = 'Đã phê duyệt & công bố';
+              heroSubtitle = 'Dữ liệu tiếp cận của bạn đã được công bố chính thức lên bản đồ.';
+            } else if (isAwaitingMoreInfo) {
+              heroBorderColor = '#fcd34d';
+              heroIconBg = '#fef3c7';
+              heroIconName = 'alert-circle-outline';
+              heroIconColor = '#d97706';
+              heroTitle = 'Cần bổ sung minh chứng';
+              heroSubtitle =
+                liveStatus?.informationRequestReason ||
+                'Kiểm duyệt viên yêu cầu bổ sung thêm ảnh hoặc thông tin trong mục Theo dõi trạng thái hồ sơ.';
+            } else if (isRejected) {
+              heroBorderColor = '#fecdd3';
+              heroIconBg = '#ffe4e6';
+              heroIconName = 'close-circle-outline';
+              heroIconColor = '#dc2626';
+              heroTitle =
+                effectiveStatus === 'Cancelled' ? 'Hồ sơ đã được hủy' : 'Hồ sơ không được duyệt';
+              heroSubtitle =
+                effectiveStatus === 'Cancelled'
+                  ? 'Bạn đã hủy hồ sơ đóng góp này.'
+                  : 'Hồ sơ không đủ điều kiện công bố. Vui lòng xem chi tiết trong Theo dõi trạng thái hồ sơ.';
+            } else if (isPendingModeration) {
+              heroTitle = 'Đã xác minh AI · Chờ kiểm duyệt';
+              heroSubtitle =
+                'Hệ thống AI đã xử lý xong. Hồ sơ đang chờ kiểm duyệt viên xem xét công bố.';
+            }
+
+            const displayReceiptCode =
+              liveStatus?.submissionCode || submittedResult.submissionId;
+
+            return (
+              <>
+                {/* Dedicated Post-Submit Receipt Hero */}
+                <View style={[styles.receiptHeroCard, { borderColor: heroBorderColor }]}>
+                  <View style={[styles.receiptIconWrap, { backgroundColor: heroIconBg }]}>
+                    <MaterialCommunityIcons name={heroIconName} size={38} color={heroIconColor} />
+                  </View>
+                  <Text style={styles.receiptTitle}>{heroTitle}</Text>
+                  <Text style={styles.receiptSubtitle}>{heroSubtitle}</Text>
+                  <View style={styles.receiptCodePill}>
+                    <MaterialCommunityIcons name="identifier" size={14} color="#004e58" />
+                    <Text style={styles.receiptCodeText}>Mã hồ sơ: {displayReceiptCode}</Text>
                   </View>
                 </View>
-              ) : null}
-            </View>
 
-            {/* Compact 3-Step Approval Timeline */}
-            <View style={styles.detailsCard}>
-              <Text style={styles.detailsTitle}>Tiến trình xử lý</Text>
+                {/* Open Contribution History Sheet */}
+                <Pressable
+                  style={({ pressed }) => [styles.historyLinkCard, pressed && styles.pressed]}
+                  onPress={() => setShowHistorySheet(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Theo dõi trạng thái hồ sơ"
+                >
+                  <View style={styles.historyLinkIconWrap}>
+                    <MaterialCommunityIcons name="clipboard-text-clock-outline" size={20} color="#004e58" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.historyLinkTitle}>Theo dõi trạng thái hồ sơ</Text>
+                    <Text style={styles.historyLinkSub}>
+                      Xem tiến độ duyệt hoặc bổ sung ảnh nếu cần
+                    </Text>
+                  </View>
+                  <MaterialCommunityIcons name="chevron-right" size={20} color="#64748b" />
+                </Pressable>
 
-              <View style={styles.timelineRow}>
-                <View style={[styles.timelineDot, styles.timelineDotDone]}>
-                  <MaterialCommunityIcons name="check" size={12} color="#ffffff" />
+                {/* Location & Confirmed Features */}
+                <View style={styles.detailsCard}>
+                  <Text style={styles.detailsTitle}>Thông tin đã ghi nhận</Text>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Địa điểm:</Text>
+                    <Text style={styles.detailValue} numberOfLines={1}>
+                      {locationName || media.locationName}
+                    </Text>
+                  </View>
+                  {selectedTagLabels.length > 0 ? (
+                    <View style={styles.tagChipsSection}>
+                      <Text style={styles.detailLabel}>Đặc điểm xác nhận ({selectedTagLabels.length}):</Text>
+                      <View style={styles.tagChipsWrap}>
+                        {selectedTagLabels.map((label) => (
+                          <View key={label} style={styles.featureChip}>
+                            <MaterialCommunityIcons name="check" size={12} color="#004e58" />
+                            <Text style={styles.featureChipText}>{label}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  ) : null}
                 </View>
-                <View style={styles.timelineTextCol}>
-                  <Text style={styles.timelineTitle}>Đã tiếp nhận hồ sơ</Text>
-                  <Text style={styles.timelineDesc}>
-                    Lưu minh chứng với mã {submittedResult.submissionId}.
-                  </Text>
-                </View>
-              </View>
 
-              <View style={styles.timelineConnector} />
+                {/* Live 3-Step Approval Timeline */}
+                <View style={styles.detailsCard}>
+                  <View style={styles.timelineHeaderRow}>
+                    <Text style={styles.detailsTitle}>Tiến trình xử lý</Text>
+                    <Pressable
+                      style={({ pressed }) => [styles.timelineRefreshBtn, pressed && styles.pressed]}
+                      onPress={() => void refreshSubmissionStatus()}
+                      disabled={isRefreshingStatus}
+                      hitSlop={8}
+                      accessibilityRole="button"
+                      accessibilityLabel="Làm mới trạng thái hồ sơ"
+                    >
+                      {isRefreshingStatus ? (
+                        <ActivityIndicator size="small" color="#004e58" />
+                      ) : (
+                        <MaterialCommunityIcons name="refresh" size={14} color="#004e58" />
+                      )}
+                      <Text style={styles.timelineRefreshText}>Làm mới</Text>
+                    </Pressable>
+                  </View>
 
-              <View style={styles.timelineRow}>
-                <View style={[styles.timelineDot, styles.timelineDotActive]}>
-                  <MaterialCommunityIcons name="clock-outline" size={12} color="#ffffff" />
-                </View>
-                <View style={styles.timelineTextCol}>
-                  <Text style={styles.timelineTitle}>Đang xác minh & chờ duyệt</Text>
-                  <Text style={styles.timelineDesc}>
-                    AI kiểm tra minh chứng và kiểm duyệt viên đối chiếu trên cổng quản trị.
-                  </Text>
-                </View>
-              </View>
+                  <View style={styles.timelineRow}>
+                    <View style={[styles.timelineDot, styles.timelineDotDone]}>
+                      <MaterialCommunityIcons name="check" size={12} color="#ffffff" />
+                    </View>
+                    <View style={styles.timelineTextCol}>
+                      <Text style={styles.timelineTitle}>Đã tiếp nhận hồ sơ</Text>
+                      <Text style={styles.timelineDesc}>
+                        Lưu minh chứng với mã {displayReceiptCode}.
+                      </Text>
+                    </View>
+                  </View>
 
-              <View style={styles.timelineConnector} />
+                  <View style={styles.timelineConnector} />
 
-              <View style={styles.timelineRow}>
-                <View style={[styles.timelineDot, styles.timelineDotPending]}>
-                  <MaterialCommunityIcons name="star-outline" size={12} color="#64748b" />
+                  <View style={styles.timelineRow}>
+                    <View
+                      style={[
+                        styles.timelineDot,
+                        isPublished
+                          ? styles.timelineDotDone
+                          : isAwaitingMoreInfo
+                            ? styles.timelineDotWarn
+                            : isRejected
+                              ? styles.timelineDotError
+                              : styles.timelineDotActive,
+                      ]}
+                    >
+                      <MaterialCommunityIcons
+                        name={
+                          isPublished
+                            ? 'check'
+                            : isAwaitingMoreInfo
+                              ? 'alert'
+                              : isRejected
+                                ? 'close'
+                                : 'clock-outline'
+                        }
+                        size={12}
+                        color="#ffffff"
+                      />
+                    </View>
+                    <View style={styles.timelineTextCol}>
+                      <Text style={styles.timelineTitle}>
+                        {isPublished
+                          ? 'AI & kiểm duyệt viên đã xác minh'
+                          : isAwaitingMoreInfo
+                            ? 'Kiểm duyệt viên yêu cầu bổ sung'
+                            : isRejected
+                              ? effectiveStatus === 'Cancelled'
+                                ? 'Hồ sơ đã hủy'
+                                : 'Hồ sơ bị từ chối'
+                              : isPendingModeration
+                                ? 'Đang chờ kiểm duyệt viên duyệt'
+                                : 'AI đang kiểm định & xếp hàng duyệt'}
+                      </Text>
+                      <Text style={styles.timelineDesc}>
+                        {isPublished
+                          ? 'Hồ sơ đã hoàn tất đối soát minh chứng.'
+                          : isAwaitingMoreInfo
+                            ? liveStatus?.informationRequestReason ||
+                              'Mở mục Theo dõi trạng thái hồ sơ để nộp lại minh chứng.'
+                            : isRejected
+                              ? effectiveStatus === 'Cancelled'
+                                ? 'Hồ sơ đã dừng xử lý theo yêu cầu của bạn.'
+                                : 'Hồ sơ không đạt điều kiện thẩm định để công bố.'
+                              : isPendingModeration
+                                ? 'Hệ thống AI đã xử lý xong; đang chờ kiểm duyệt viên đối chiếu.'
+                                : 'AI đang phân tích minh chứng trước khi chuyển kiểm duyệt viên.'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.timelineConnector} />
+
+                  <View style={styles.timelineRow}>
+                    <View
+                      style={[
+                        styles.timelineDot,
+                        isPublished
+                          ? styles.timelineDotDone
+                          : isRejected
+                            ? styles.timelineDotError
+                            : styles.timelineDotPending,
+                      ]}
+                    >
+                      <MaterialCommunityIcons
+                        name={isPublished ? 'star' : isRejected ? 'close' : 'star-outline'}
+                        size={12}
+                        color={isPublished || isRejected ? '#ffffff' : '#64748b'}
+                      />
+                    </View>
+                    <View style={styles.timelineTextCol}>
+                      <Text
+                        style={[
+                          styles.timelineTitle,
+                          !isPublished && !isRejected && { color: '#475569' },
+                        ]}
+                      >
+                        {isPublished
+                          ? 'Đã công bố lên bản đồ'
+                          : isRejected
+                            ? 'Không công bố'
+                            : 'Công bố dữ liệu tiếp cận'}
+                      </Text>
+                      <Text style={styles.timelineDesc}>
+                        {isPublished
+                          ? 'Các hạng mục đã duyệt đã cập nhật vào dữ liệu địa điểm và ghi nhận điểm đóng góp.'
+                          : isRejected
+                            ? 'Không có thay đổi nào được công bố lên bản đồ.'
+                            : 'Sau khi kiểm duyệt viên phê duyệt, tiện ích sẽ hiển thị trên bản đồ.'}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
-                <View style={styles.timelineTextCol}>
-                  <Text style={[styles.timelineTitle, { color: '#475569' }]}>
-                    Công bố & nhận +50 EXP
-                  </Text>
-                  <Text style={styles.timelineDesc}>
-                    Cập nhật tiện ích lên bản đồ và cộng điểm thưởng vào tài khoản.
-                  </Text>
-                </View>
-              </View>
-            </View>
-          </>
+              </>
+            );
+          })()
         ) : (
           <>
-            {/* Top Hero: Score Meter & Status Badge */}
-            <View style={styles.heroCard}>
-              <ScoreMeterRing
-                score={overallScore}
-                size={130}
-                strokeWidth={11}
-                animated={true}
-                onAnimationComplete={handleScoreAnimationComplete}
-              />
+            {/* Top Hero: Spec-aligned Pre-Submit Readiness (Contribution) or Score Meter (Report) */}
+            {flow === 'report' ? (
+              <View style={styles.heroCard}>
+                <ScoreMeterRing
+                  score={overallScore}
+                  size={130}
+                  strokeWidth={11}
+                  animated={true}
+                  onAnimationComplete={handleScoreAnimationComplete}
+                />
 
-              <Animated.View
-                style={[
-                  styles.statusBadge,
-                  {
-                    backgroundColor: statusBg,
-                    borderColor: statusBorder,
-                    opacity: badgeOpacity,
-                    transform: [{ scale: badgeScale }],
-                  },
-                ]}
-              >
-                <MaterialCommunityIcons name={statusIcon} size={18} color={statusColor} />
-                <Text style={[styles.statusTitle, { color: statusColor }]}>{statusLabel}</Text>
-              </Animated.View>
+                <Animated.View
+                  style={[
+                    styles.statusBadge,
+                    {
+                      backgroundColor: statusBg,
+                      borderColor: statusBorder,
+                      opacity: badgeOpacity,
+                      transform: [{ scale: badgeScale }],
+                    },
+                  ]}
+                >
+                  <MaterialCommunityIcons name={statusIcon} size={18} color={statusColor} />
+                  <Text style={[styles.statusTitle, { color: statusColor }]}>{statusLabel}</Text>
+                </Animated.View>
 
-              <Animated.View
-                style={{
-                  width: '100%',
-                  alignItems: 'center',
-                  opacity: contentOpacity,
-                  transform: [{ translateY: contentTranslateY }],
-                }}
-              >
-                <Text style={styles.statusDescription}>{statusDescription}</Text>
-              </Animated.View>
-            </View>
+                <Animated.View
+                  style={{
+                    width: '100%',
+                    alignItems: 'center',
+                    opacity: contentOpacity,
+                    transform: [{ translateY: contentTranslateY }],
+                  }}
+                >
+                  <Text style={styles.statusDescription}>{statusDescription}</Text>
+                </Animated.View>
+              </View>
+            ) : (
+              (() => {
+                const hasReadinessWarning =
+                  Boolean(qualityWarning) || selectedTagKeys.length === 0 || !spatialValid;
+                const readinessBadgeText =
+                  selectedTagKeys.length === 0
+                    ? 'Chưa chọn đặc điểm'
+                    : qualityWarning
+                      ? 'Ảnh cần kiểm tra lại'
+                      : !spatialValid
+                        ? 'Vị trí GPS bị lệch'
+                        : 'Sẵn sàng gửi kiểm duyệt';
+                const readinessDesc = qualityWarning
+                  ? qualityWarning
+                  : selectedTagKeys.length === 0
+                    ? 'Bạn chưa chọn đặc điểm tiếp cận nào ở Bước 2. Nên quay lại chọn ít nhất 1 đặc điểm trước khi gửi.'
+                    : !spatialValid
+                      ? `Vị trí thiết bị đang cách địa điểm ${spatialDistanceMeters ?? '> 50'}m (vượt bán kính 50m). Nên chọn lại đúng vị trí hoặc chụp gần lối vào hơn trước khi gửi.`
+                      : 'Hồ sơ đã sẵn sàng. Điểm tin cậy chính thức sẽ được hệ thống AI máy chủ thẩm định sau khi gửi để kiểm duyệt viên xét duyệt.';
+
+                return (
+                  <View style={styles.heroCard}>
+                    <View
+                      style={[
+                        styles.readinessIconWrap,
+                        {
+                          backgroundColor: hasReadinessWarning ? '#fef3c7' : '#ecfdf5',
+                        },
+                      ]}
+                    >
+                      <MaterialCommunityIcons
+                        name={hasReadinessWarning ? 'alert-circle-outline' : 'shield-check-outline'}
+                        size={34}
+                        color={hasReadinessWarning ? '#d97706' : '#059669'}
+                      />
+                    </View>
+
+                    <Text style={styles.readinessTitle}>Kiểm tra sơ bộ trước khi gửi</Text>
+
+                    <View
+                      style={[
+                        styles.statusBadge,
+                        {
+                          backgroundColor: hasReadinessWarning
+                            ? 'rgba(217, 119, 6, 0.12)'
+                            : 'rgba(5, 150, 105, 0.12)',
+                          borderColor: hasReadinessWarning ? '#d97706' : '#059669',
+                        },
+                      ]}
+                    >
+                      <MaterialCommunityIcons
+                        name={hasReadinessWarning ? 'alert-outline' : 'check-circle-outline'}
+                        size={16}
+                        color={hasReadinessWarning ? '#d97706' : '#059669'}
+                      />
+                      <Text
+                        style={[
+                          styles.statusTitle,
+                          {
+                            color: hasReadinessWarning ? '#d97706' : '#059669',
+                          },
+                        ]}
+                      >
+                        {readinessBadgeText}
+                      </Text>
+                    </View>
+
+                    <Text style={styles.statusDescription}>{readinessDesc}</Text>
+
+                    {qualityWarning ? (
+                      <Pressable
+                        style={({ pressed }) => [styles.readinessRetakeBtn, pressed && styles.pressed]}
+                        onPress={onRetakeOrReset}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Chụp lại ảnh rõ hơn"
+                      >
+                        <MaterialCommunityIcons name="camera-retake-outline" size={16} color="#92400e" />
+                        <Text style={styles.readinessRetakeText}>Chụp lại ảnh rõ hơn</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                );
+              })()
+            )}
 
             {/* Breakdown Matrix & Details */}
             <Animated.View
@@ -659,14 +961,16 @@ export function FinalScorecardScreen({
                 mediaType={media.type === 'video' ? 'video' : 'photo'}
               />
 
-              <ScoreCriteriaExplainer
-                overallScore={overallScore}
-                hasNoFeatures={selectedTagKeys.length === 0}
-                cvScore={pillars.computerVision.score}
-                spatialDistanceMeters={spatialDistanceMeters}
-                mediaType={media.type === 'video' ? 'video' : 'photo'}
-                hasNotes={Boolean(notes.trim())}
-              />
+              {flow === 'report' ? (
+                <ScoreCriteriaExplainer
+                  overallScore={overallScore}
+                  hasNoFeatures={selectedTagKeys.length === 0}
+                  cvScore={pillars.computerVision.score}
+                  spatialDistanceMeters={spatialDistanceMeters}
+                  mediaType={media.type === 'video' ? 'video' : 'photo'}
+                  hasNotes={Boolean(notes.trim())}
+                />
+              ) : null}
 
               {/* POI & Submission Details Card */}
               <View style={styles.detailsCard}>
@@ -752,11 +1056,11 @@ export function FinalScorecardScreen({
                   </View>
                 ) : null}
                 <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Ghi nhận EXP:</Text>
+                  <Text style={styles.detailLabel}>Ghi nhận điểm:</Text>
                   <View style={styles.expPill}>
                     <MaterialCommunityIcons name="star-circle-outline" size={14} color="#b45309" />
                     <Text style={styles.expPillText}>
-                      {flow === 'report' ? '+30 EXP sau khi duyệt' : '+50 EXP sau khi duyệt'}
+                      {flow === 'report' ? '+1 danh vọng · +1 uy tín khi xác nhận' : '+2~5 danh vọng · +2 uy tín khi công bố'}
                     </Text>
                   </View>
                 </View>
@@ -781,9 +1085,22 @@ export function FinalScorecardScreen({
                   style={styles.dockedConflictResetBtn}
                   onPress={handleResetSubmissionId}
                   accessibilityRole="button"
+                  accessibilityLabel="Tạo phiên mới và thử lại"
+                  hitSlop={8}
                 >
                   <MaterialCommunityIcons name="refresh" size={12} color="#9f1239" />
                   <Text style={styles.dockedConflictResetText}>Tạo phiên mới và thử lại</Text>
+                </Pressable>
+              )}
+              {needsRetakeOnError && (
+                <Pressable
+                  style={styles.dockedRetakeBtn}
+                  onPress={onRetakeOrReset}
+                  accessibilityRole="button"
+                  accessibilityLabel="Chụp hoặc chọn lại ảnh"
+                >
+                  <MaterialCommunityIcons name="camera-retake-outline" size={15} color="#9f1239" />
+                  <Text style={styles.dockedRetakeText}>Chụp / chọn lại ảnh</Text>
                 </Pressable>
               )}
             </View>
@@ -878,13 +1195,18 @@ export function FinalScorecardScreen({
 
       <LoginRequiredModal
         visible={showLoginModal}
-        featureName="xuất bản dữ liệu tiếp cận và nhận +50 EXP"
+        featureName="xuất bản dữ liệu tiếp cận và tích lũy điểm danh vọng"
         onClose={() => setShowLoginModal(false)}
       />
 
       <ContributionHistorySheet
         visible={showHistorySheet}
-        onClose={() => setShowHistorySheet(false)}
+        onClose={() => {
+          setShowHistorySheet(false);
+          if (submittedResult) {
+            void refreshSubmissionStatus();
+          }
+        }}
       />
 
       <Modal
@@ -1089,6 +1411,37 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: 6,
   },
+  readinessIconWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  readinessTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0f172a',
+    textAlign: 'center',
+  },
+  readinessRetakeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    minHeight: 44,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#fef3c7',
+    borderWidth: 1,
+    borderColor: '#fcd34d',
+  },
+  readinessRetakeText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#92400e',
+  },
   statusTitle: {
     fontSize: 13.5,
     fontWeight: '800',
@@ -1196,14 +1549,34 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffe4e6',
     borderWidth: 1,
     borderColor: '#fecdd3',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+    minHeight: 40,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
     borderRadius: 6,
-    marginTop: 5,
+    marginTop: 6,
     alignSelf: 'flex-start',
   },
   dockedConflictResetText: {
-    fontSize: 10.5,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#9f1239',
+  },
+  dockedRetakeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#ffe4e6',
+    borderWidth: 1,
+    borderColor: '#fecdd3',
+    minHeight: 44,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
+  dockedRetakeText: {
+    fontSize: 12,
     fontWeight: '700',
     color: '#9f1239',
   },
@@ -1284,6 +1657,30 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#004e58',
   },
+  timelineHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  timelineRefreshBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+    backgroundColor: '#f0fdfa',
+    borderWidth: 1,
+    borderColor: '#ccfbf1',
+  },
+  timelineRefreshText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#004e58',
+  },
   timelineRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1302,6 +1699,12 @@ const styles = StyleSheet.create({
   },
   timelineDotActive: {
     backgroundColor: '#004e58',
+  },
+  timelineDotWarn: {
+    backgroundColor: '#d97706',
+  },
+  timelineDotError: {
+    backgroundColor: '#dc2626',
   },
   timelineDotPending: {
     backgroundColor: '#e2e8f0',

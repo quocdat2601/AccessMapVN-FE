@@ -30,6 +30,7 @@ import { TagReviewScreen, type UserMeasurementsInput } from './TagReviewScreen';
 import { FinalScorecardScreen } from './FinalScorecardScreen';
 import type { ProposedUploadScope } from '../../api/mediaUploadService';
 import {
+  validateCapturedMedia,
   verifyWithAiOrFallback,
   type VerificationMatrixResult,
   type VerificationMatrixInput,
@@ -128,6 +129,7 @@ function ActiveCameraContributionScreen() {
   const [workflowStep, setWorkflowStep] = useState<'camera' | 'tag_review' | 'final_scorecard'>('camera');
   const [preScanTags, setPreScanTags] = useState<PreScanFeatureTag[]>([]);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [preScanQualityWarning, setPreScanQualityWarning] = useState<string | null>(null);
   const [isPreScanning, setIsPreScanning] = useState(false);
   const [videoPreviewUri, setVideoPreviewUri] = useState<string | null>(null);
   const [confirmedTagKeys, setConfirmedTagKeys] = useState<string[]>([]);
@@ -362,18 +364,46 @@ function ActiveCameraContributionScreen() {
   );
 
   const startPreScanForMedia = useCallback((media: CapturedContributionMedia) => {
+    const validation = validateCapturedMedia({
+      type: media.type,
+      width: media.width,
+      height: media.height,
+      durationSeconds: media.durationSeconds,
+    });
+    if (!validation.valid) {
+      setMessage(validation.message);
+      return;
+    }
+
+    setMessage(null);
     setCapturedMedia(media);
     setWorkflowStep('tag_review');
     setIsPreScanning(true);
     setPreScanTags([]);
     setAiSummary(null);
+    setPreScanQualityWarning(null);
     setVideoPreviewUri(null);
 
     const request = media.type === 'video' ? runAiVideoPreScan(media.uri) : runAiPreScan(media.uri);
     void request.then((result) => {
       if (!mounted.current) return;
+      if (media.type === 'photo' && result.mediaWidth && result.mediaHeight) {
+        const decodedCheck = validateCapturedMedia({
+          type: 'photo',
+          width: result.mediaWidth,
+          height: result.mediaHeight,
+        });
+        if (!decodedCheck.valid) {
+          setIsPreScanning(false);
+          setCapturedMedia(null);
+          setWorkflowStep('camera');
+          setMessage(decodedCheck.message);
+          return;
+        }
+      }
       setPreScanTags(result.features);
       setAiSummary(result.summary);
+      setPreScanQualityWarning(result.qualityWarning ?? null);
       setVideoPreviewUri(result.previewFrameUri ?? null);
       setIsPreScanning(false);
     });
@@ -384,7 +414,7 @@ function ActiveCameraContributionScreen() {
     setIsCapturing(true);
     setMessage(null);
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.75, skipProcessing: false, base64: true });
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.9, skipProcessing: false, base64: true });
       if (!mounted.current) return;
       const media: CapturedContributionMedia = {
         id: createMediaId(),
@@ -463,6 +493,7 @@ function ActiveCameraContributionScreen() {
     setCapturedMedia(null);
     setCameraReady(false);
     setMessage(null);
+    setPreScanQualityWarning(null);
     setWorkflowStep('camera');
     setMatrixResult(null);
     setUserObservations({});
@@ -541,6 +572,7 @@ function ActiveCameraContributionScreen() {
           notes={fieldNotes}
           userMeasurements={userMeasurements}
           proposedScope={proposedScope}
+          qualityWarning={preScanQualityWarning}
           locationName={targetLocationName}
           locationAddress={targetAddress}
           onChangeLocation={() => setShowLocationModal(true)}
@@ -571,6 +603,7 @@ function ActiveCameraContributionScreen() {
           previewFrameUri={videoPreviewUri}
           availableTags={preScanTags}
           aiSummary={aiSummary}
+          qualityWarning={preScanQualityWarning}
           isPreScanning={isPreScanning}
           locationName={targetLocationName}
           locationAddress={targetAddress}

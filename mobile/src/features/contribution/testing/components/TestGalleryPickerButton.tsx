@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { CapturedContributionMedia } from '@/entities/contribution';
+import { validateCapturedMedia } from '../../lib/verificationEngine';
 import { adaptPickerImageToMediaResult } from '../adapters/testImageAdapter';
 
 function getNativeImagePicker(): typeof import('expo-image-picker') | null {
@@ -77,6 +78,21 @@ export function TestGalleryPickerButton({
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const asset = result.assets[0];
+        const assetDurationSec =
+          mode === 'video' && typeof asset.duration === 'number'
+            ? Math.round(asset.duration / 1000)
+            : undefined;
+        const validation = validateCapturedMedia({
+          type: mode,
+          width: asset.width,
+          height: asset.height,
+          fileSize: asset.fileSize,
+          durationSeconds: assetDurationSec,
+        });
+        if (!validation.valid) {
+          Alert.alert('Ảnh/video chưa đạt yêu cầu', validation.message);
+          return;
+        }
         const adaptedMedia = adaptPickerImageToMediaResult(
           {
             uri: asset.uri,
@@ -86,7 +102,7 @@ export function TestGalleryPickerButton({
             fileSize: asset.fileSize,
             base64: asset.base64 ?? undefined,
             type: mode,
-            durationSeconds: mode === 'video' ? (asset.duration ? Math.round(asset.duration / 1000) : 6) : undefined,
+            durationSeconds: mode === 'video' ? (assetDurationSec ?? 6) : undefined,
           },
           locationId,
           locationName,

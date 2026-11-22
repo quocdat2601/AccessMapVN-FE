@@ -1,7 +1,11 @@
 import assert from 'node:assert';
 import { adaptPickerImageToMediaResult, type PickerImageInput } from '../testing/adapters/testImageAdapter.ts';
 import { getPoiAnchorCoords } from '../testing/mocks/mockPoiAnchor.ts';
-import { calculateHaversineDistanceMeters } from '../lib/verificationEngine.ts';
+import {
+  calculateHaversineDistanceMeters,
+  mapContributionError,
+  validateCapturedMedia,
+} from '../lib/verificationEngine.ts';
 
 export function runTestImageAdapterTests() {
   console.log('🧪 [TEST SUITE 2] testImageAdapter.test.ts');
@@ -73,6 +77,61 @@ export function runTestImageAdapterTests() {
     );
     assert.strictEqual(deviation, 0, 'Deviation from custom coordinates must be 0 meters');
     console.log('  ✅ Test Case 3: Auto-anchor GPS to custom targetCoordinates with 0m deviation (PASSED)');
+  }
+
+  // Test Case 4: Validate photo/video dimensions, size, and duration thresholds
+  {
+    const lowRes = validateCapturedMedia({ type: 'photo', width: 600, height: 750 });
+    assert.strictEqual(lowRes.valid, false);
+    if (!lowRes.valid) {
+      assert.strictEqual(lowRes.code, 'INVALID_PHOTO_RESOLUTION');
+      assert.ok(lowRes.message.includes('600×750'));
+    }
+
+    assert.deepStrictEqual(validateCapturedMedia({ type: 'photo', width: 1280, height: 720 }), { valid: true });
+    assert.deepStrictEqual(validateCapturedMedia({ type: 'photo', width: 720, height: 1280 }), { valid: true });
+    assert.deepStrictEqual(validateCapturedMedia({ type: 'photo', width: 1440, height: 1920 }), { valid: true });
+
+    const oversized = validateCapturedMedia({
+      type: 'photo',
+      width: 1920,
+      height: 1080,
+      fileSize: 11 * 1024 * 1024,
+    });
+    assert.strictEqual(oversized.valid, false);
+    if (!oversized.valid) assert.strictEqual(oversized.code, 'MEDIA_TOO_LARGE');
+
+    const shortVideo = validateCapturedMedia({
+      type: 'video',
+      width: 1280,
+      height: 720,
+      durationSeconds: 3,
+    });
+    assert.strictEqual(shortVideo.valid, false);
+    if (!shortVideo.valid) assert.strictEqual(shortVideo.code, 'INVALID_VIDEO_DURATION');
+    console.log('  ✅ Test Case 4: Early media resolution, size, and duration validation (PASSED)');
+  }
+
+  // Test Case 5: Map Backend validation/conflict error codes to Vietnamese UX messages
+  {
+    const invalidResErr = mapContributionError({
+      status: 422,
+      code: 'INVALID_PHOTO_RESOLUTION',
+      message: 'INVALID_PHOTO_RESOLUTION',
+    });
+    assert.strictEqual(invalidResErr.code, 'INVALID_PHOTO_RESOLUTION');
+    assert.strictEqual(invalidResErr.needsRetake, true);
+    assert.strictEqual(invalidResErr.isConflict, false);
+    assert.ok(invalidResErr.message.includes('1280×720'));
+
+    const conflictErr = mapContributionError({ status: 409, message: 'Duplicate' });
+    assert.strictEqual(conflictErr.isConflict, true);
+    assert.strictEqual(conflictErr.needsRetake, false);
+
+    const largeErr = mapContributionError({ status: 413, data: { code: 'MEDIA_TOO_LARGE' } });
+    assert.strictEqual(largeErr.code, 'MEDIA_TOO_LARGE');
+    assert.strictEqual(largeErr.needsRetake, true);
+    console.log('  ✅ Test Case 5: Map Backend contribution errors to Vietnamese messages (PASSED)');
   }
 }
 

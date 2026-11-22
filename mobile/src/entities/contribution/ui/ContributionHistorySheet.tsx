@@ -14,9 +14,12 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { apiClient } from '@/shared/api/client';
 import { Colors } from '@/shared/theme';
 import {
+  fetchSubmissionStatus,
   getContributionRecords,
   loadContributionRecords,
+  normalizeBackendSubmissionStatus,
   syncPendingSubmissionsWithBackend,
+  updateContributionRecordStatus,
 } from '../model/store';
 import type { ContributionSubmissionRecord } from '../model/types';
 
@@ -26,6 +29,10 @@ interface ContributionHistorySheetProps {
 }
 
 const FEATURE_LABEL_MAP: Record<string, string> = {
+  EntranceDoor: 'Cửa ra vào',
+  Ramp: 'Ram dốc',
+  Elevator: 'Thang máy',
+  AccessibleRestroom: 'Nhà vệ sinh tiếp cận',
   door_width_ok: 'Cửa ra vào',
   door_threshold_flat: 'Ngạch cửa phẳng',
   door_lever_handle: 'Cửa tự động / tay gạt',
@@ -63,7 +70,7 @@ const FALLBACK_DEMO_ITEMS: ContributionSubmissionRecord[] = [
     textDescription: 'Lối vào sảnh chính có ram dốc đối chiếu QCVN 10:2024/BXD',
     status: 'Published',
     confidenceScore: 0.94,
-    pointsAwarded: 50,
+    pointsAwarded: 5,
     createdAt: Date.now() - 86400000 * 2,
     revision: 1,
     resubmissionCount: 0,
@@ -88,42 +95,115 @@ const FALLBACK_DEMO_ITEMS: ContributionSubmissionRecord[] = [
 
 export function ContributionHistorySheet({ visible, onClose }: ContributionHistorySheetProps) {
   const [items, setItems] = useState<ContributionSubmissionRecord[]>([]);
+  const [ownerRep, setOwnerRep] = useState<{
+    reputationPoints: number;
+    accountStandingScore: number;
+    rankLabel: string;
+  } | null>(null);
+  const [failedThumbs, setFailedThumbs] = useState<Record<string, boolean>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [actionInProgressId, setActionInProgressId] = useState<string | null>(null);
 
   const fetchRecords = async () => {
     setIsLoading(true);
+    const local = await loadContributionRecords();
+    const localMap = new Map(local.map((r) => [r.id, r]));
+
     try {
-      // 1. Try real backend endpoint GET /api/v1/submissions/mine (supports both array and { items } page)
-      const res = await apiClient.get<any>('/api/v1/submissions/mine');
+      const [res, rep] = await Promise.all([
+        apiClient.get<any>('/api/v1/submissions/mine', { auth: 'required' }),
+        apiClient.get<any>('/api/v1/me/reputation', { auth: 'required' }).catch(() => null),
+      ]);
+      if (rep && typeof rep.reputationPoints === 'number') {
+        setOwnerRep({
+          reputationPoints: Number(rep.reputationPoints ?? 0),
+          accountStandingScore: Number(rep.accountStandingScore ?? 50),
+          rankLabel: typeof rep.rankLabel === 'string' ? rep.rankLabel : 'Unranked',
+        });
+      }
+
       const rows: any[] = Array.isArray(res)
         ? res
         : Array.isArray(res?.items)
           ? res.items
           : [];
       if (rows.length > 0) {
-        const mapped: ContributionSubmissionRecord[] = rows.map((r) => ({
-          id: String(r.submissionId || r.id || r.submission_code || ''),
-          submissionCode: r.submission_code || r.submissionCode ? String(r.submission_code || r.submissionCode) : undefined,
-          locationId: String(r.locationId || r.place_id || r.placeId || ''),
-          locationName: String(r.location_name || r.locationName || r.submissionCode || 'Địa điểm khảo sát'),
-          mediaUri: (r.media_urls && r.media_urls[0]) || (r.mediaUrls && r.mediaUrls[0]) || '',
-          mediaType: 'photo',
-          featureTags: r.feature_tags || r.featureTags || [],
-          textDescription: r.text_description || r.textDescription,
-          status: (r.status as any) || 'Submitted',
-          confidenceScore: Number(r.confidence_score ?? r.confidenceScore ?? 0),
-          pointsAwarded: r.points_awarded ?? r.pointsAwarded ?? 0,
-          createdAt: r.createdAt
-            ? new Date(r.createdAt).getTime()
-            : r.created_at
-              ? new Date(r.created_at).getTime()
-              : Date.now(),
-          revision: r.revision ?? 1,
-          resubmissionCount: r.resubmission_count ?? r.resubmissionCount ?? 0,
-          moderatorNote: r.moderator_note || r.moderatorNote,
-        }));
-        setItems(mapped);
+        const mapped: ContributionSubmissionRecord[] = rows.map((r) => {
+          const id = String(r.submissionId || r.id || r.submission_code || '');
+          const localItem = localMap.get(id);
+          const status = normalizeBackendSubmissionStatus(r.status);
+          const submissionCode =
+            r.submission_code || r.submissionCode
+              ? String(r.submission_code || r.submissionCode)
+              : localItem?.submissionCode;
+          const localSafeMediaUri =
+            localItem?.mediaUri &&
+            (localItem.mediaUri.startsWith('file://') ||
+              localItem.mediaUri.startsWith('data:') ||
+              localItem.mediaUri.includes('X-Amz-Signature'))
+              ? localItem.mediaUri
+              : '';
+          const mediaUri =
+            r.previewMediaUrl ||
+            (r.media_urls && r.media_urls[0]) ||
+            (r.mediaUrls && r.mediaUrls[0]) ||
+            localSafeMediaUri;
+          const mediaType: 'photo' | 'video' =
+            r.previewMediaType === 'video' || localItem?.mediaType === 'video' ? 'video' : 'photo';
+
+          return {
+            id,
+            submissionCode,
+            locationId: String(r.locationId || r.place_id || r.placeId || localItem?.locationId || ''),
+            locationName: String(
+              r.location_name || r.locationName || localItem?.locationName || submissionCode || 'Địa điểm khảo sát'
+            ),
+            mediaUri,
+            mediaType,
+            featureTags:
+              (Array.isArray(r.feature_tags) && r.feature_tags) ||
+              (Array.isArray(r.featureTags) && r.featureTags) ||
+              localItem?.featureTags ||
+              [],
+            textDescription: r.text_description || r.textDescription || localItem?.textDescription,
+            status,
+            confidenceScore: Number(r.confidence_score ?? r.confidenceScore ?? localItem?.confidenceScore ?? 0),
+            pointsAwarded: r.points_awarded ?? r.pointsAwarded ?? localItem?.pointsAwarded ?? 0,
+            createdAt: r.createdAt
+              ? new Date(r.createdAt).getTime()
+              : r.created_at
+                ? new Date(r.created_at).getTime()
+                : localItem?.createdAt ?? Date.now(),
+            revision: r.revision ?? localItem?.revision ?? 1,
+            resubmissionCount: r.resubmission_count ?? r.resubmissionCount ?? localItem?.resubmissionCount ?? 0,
+            moderatorNote: r.moderator_note || r.moderatorNote || localItem?.moderatorNote,
+          };
+        });
+
+        const enriched = await Promise.all(
+          mapped.map(async (item) => {
+            if (item.status === 'AwaitingMoreInfo' && !item.moderatorNote) {
+              const detail = await fetchSubmissionStatus(item.id);
+              if (detail?.informationRequestReason) {
+                return { ...item, moderatorNote: detail.informationRequestReason };
+              }
+            }
+            return item;
+          })
+        );
+
+        for (const item of enriched) {
+          updateContributionRecordStatus(item.id, {
+            status: item.status,
+            submissionCode: item.submissionCode,
+            revision: item.revision,
+            resubmissionCount: item.resubmissionCount,
+            moderatorNote: item.moderatorNote,
+          });
+        }
+
+        setFailedThumbs({});
+        setItems(enriched);
         return;
       }
     } catch {
@@ -132,9 +212,8 @@ export function ContributionHistorySheet({ visible, onClose }: ContributionHisto
       setIsLoading(false);
     }
 
-    // 2. Read local store
-    const local = await loadContributionRecords();
     const finalItems = local.length > 0 ? local : getContributionRecords();
+    setFailedThumbs({});
     if (finalItems.length > 0) {
       setItems(finalItems);
     } else {
@@ -306,6 +385,7 @@ export function ContributionHistorySheet({ visible, onClose }: ContributionHisto
           </View>
         );
       case 'AwaitingMoreInfo':
+      case 'NeedsSupplement':
         return (
           <View style={[styles.statusBadge, { backgroundColor: '#FEF3C7' }]}>
             <Ionicons name="alert-circle" size={13} color="#D97706" />
@@ -314,10 +394,18 @@ export function ContributionHistorySheet({ visible, onClose }: ContributionHisto
             </Text>
           </View>
         );
+      case 'AIProcessing':
+        return (
+          <View style={[styles.statusBadge, { backgroundColor: '#EFF6FF' }]}>
+            <Ionicons name="sparkles-outline" size={13} color="#2563EB" />
+            <Text style={[styles.statusText, { color: '#2563EB' }]}>
+              AI đang kiểm định
+            </Text>
+          </View>
+        );
       case 'PendingModeration':
       case 'Pending Moderation':
       case 'Submitted':
-      case 'AIProcessing':
         return (
           <View style={[styles.statusBadge, { backgroundColor: '#EFF6FF' }]}>
             <Ionicons name="time-outline" size={13} color="#2563EB" />
@@ -354,7 +442,12 @@ export function ContributionHistorySheet({ visible, onClose }: ContributionHisto
   };
 
   const totalExp = items.reduce((sum, item) => sum + item.pointsAwarded, 0);
-  const tierLabel = totalExp >= 500 ? 'Vàng' : totalExp >= 200 ? 'Bạc' : 'Đồng';
+  const displayPoints = ownerRep ? ownerRep.reputationPoints : totalExp;
+  const summaryTitle = ownerRep
+    ? ownerRep.rankLabel && ownerRep.rankLabel !== 'Unranked'
+      ? `Xếp hạng ${ownerRep.rankLabel} · Uy tín ${ownerRep.accountStandingScore}/100`
+      : `Uy tín ${ownerRep.accountStandingScore}/100`
+    : 'Điểm danh vọng đóng góp';
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -370,15 +463,31 @@ export function ContributionHistorySheet({ visible, onClose }: ContributionHisto
               <Text style={styles.title}>Đóng góp của tôi</Text>
               <Text style={styles.subtitle}>Theo dõi tiến độ duyệt và bổ sung minh chứng</Text>
             </View>
-            <Pressable
-              style={({ pressed }) => [styles.closeBtn, pressed && styles.pressed]}
-              onPress={onClose}
-              accessibilityRole="button"
-              accessibilityLabel="Đóng lịch sử đóng góp"
-              hitSlop={6}
-            >
-              <MaterialCommunityIcons name="close" size={20} color="#475569" />
-            </Pressable>
+            <View style={styles.headerActions}>
+              <Pressable
+                style={({ pressed }) => [styles.closeBtn, pressed && styles.pressed]}
+                onPress={() => void fetchRecords()}
+                disabled={isLoading}
+                accessibilityRole="button"
+                accessibilityLabel="Làm mới danh sách hồ sơ"
+                hitSlop={6}
+              >
+                {isLoading ? (
+                  <ActivityIndicator size="small" color="#004F58" />
+                ) : (
+                  <MaterialCommunityIcons name="refresh" size={20} color="#475569" />
+                )}
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.closeBtn, pressed && styles.pressed]}
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel="Đóng lịch sử đóng góp"
+                hitSlop={6}
+              >
+                <MaterialCommunityIcons name="close" size={20} color="#475569" />
+              </Pressable>
+            </View>
           </View>
 
           {/* Summary Card */}
@@ -386,15 +495,15 @@ export function ContributionHistorySheet({ visible, onClose }: ContributionHisto
             <View style={styles.summaryLeft}>
               <MaterialCommunityIcons name="shield-star" size={30} color="#f59e0b" />
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.summaryTier}>Hạng đóng góp: {tierLabel}</Text>
+                <Text style={styles.summaryTier}>{summaryTitle}</Text>
                 <Text style={styles.summarySub}>
                   {items.length} lượt đóng góp · Dữ liệu đối chiếu QCVN 10:2024/BXD
                 </Text>
               </View>
             </View>
             <View style={styles.expBadge}>
-              <Text style={styles.expVal}>+{totalExp}</Text>
-              <Text style={styles.expUnit}>EXP</Text>
+              <Text style={styles.expVal}>+{displayPoints}</Text>
+              <Text style={styles.expUnit}>ĐIỂM</Text>
             </View>
           </View>
 
@@ -414,7 +523,7 @@ export function ContributionHistorySheet({ visible, onClose }: ContributionHisto
                 <MaterialCommunityIcons name="camera-plus-outline" size={48} color="#94a3b8" />
                 <Text style={styles.emptyTitle}>Chưa có đóng góp nào</Text>
                 <Text style={styles.emptyDesc}>
-                  Hãy chụp ảnh ram dốc, lối vào hoặc thang máy tiếp cận trên bản đồ để nhận ngay +50 EXP mỗi lần!
+                  Hãy chụp ảnh ram dốc, lối vào hoặc thang máy tiếp cận trên bản đồ để đóng góp dữ liệu chính xác cho cộng đồng!
                 </Text>
               </View>
             ) : (
@@ -427,11 +536,22 @@ export function ContributionHistorySheet({ visible, onClose }: ContributionHisto
                 return (
                   <View key={item.id} style={styles.card}>
                     <View style={styles.cardHeader}>
-                      {item.mediaType === 'photo' && item.mediaUri ? (
-                        <Image source={{ uri: item.mediaUri }} style={styles.thumbnail} contentFit="cover" />
-                      ) : (
+                      {item.mediaType === 'photo' && item.mediaUri && !failedThumbs[item.id] ? (
+                        <Image
+                          source={{ uri: item.mediaUri }}
+                          style={styles.thumbnail}
+                          contentFit="cover"
+                          onError={() =>
+                            setFailedThumbs((prev) => (prev[item.id] ? prev : { ...prev, [item.id]: true }))
+                          }
+                        />
+                      ) : item.mediaType === 'video' ? (
                         <View style={styles.thumbnailFallback}>
                           <MaterialCommunityIcons name="video" size={24} color="#38bdf8" />
+                        </View>
+                      ) : (
+                        <View style={[styles.thumbnailFallback, styles.thumbnailPhotoFallback]}>
+                          <MaterialCommunityIcons name="image-outline" size={24} color="#64748b" />
                         </View>
                       )}
                       <View style={styles.cardMeta}>
@@ -458,7 +578,7 @@ export function ContributionHistorySheet({ visible, onClose }: ContributionHisto
                         <View style={styles.statusRow}>
                           {renderStatusBadge(item.status)}
                           {item.pointsAwarded > 0 && (
-                            <Text style={styles.itemExp}>+{item.pointsAwarded} EXP</Text>
+                            <Text style={styles.itemExp}>+{item.pointsAwarded} điểm</Text>
                           )}
                         </View>
                       </View>
@@ -585,10 +705,15 @@ const styles = StyleSheet.create({
     color: '#64748b',
     marginTop: 2,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   closeBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: '#f1f5f9',
     alignItems: 'center',
     justifyContent: 'center',
@@ -701,6 +826,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#e0f2fe',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  thumbnailPhotoFallback: {
+    backgroundColor: '#f1f5f9',
   },
   cardMeta: {
     flex: 1,

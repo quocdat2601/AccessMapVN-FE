@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import { supabase, isSupabaseConfigured } from '@/shared/lib/supabase';
-import { apiClient, resolveServiceUrl } from '@/shared/api/client';
+import { ApiError, apiClient, resolveServiceUrl } from '@/shared/api/client';
 
 export interface MediaUploadResponse {
   url: string;
@@ -54,8 +54,9 @@ export interface UploadedMediaMetadata {
   suggestionCorrelationId?: string;
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const uploadedMediaMetadataByUrl = new Map<string, UploadedMediaMetadata>();
+let lastUploadIntentError: string | null = null;
 
 const FEATURE_TAG_TO_BACKEND_TYPE: Record<string, string> = {
   exterior_ramp_present: 'Ramp',
@@ -126,22 +127,28 @@ function getMediaFileInfo(uri: string): { ext: string; mimeType: string; isVideo
   return { ext: 'jpg', mimeType: 'image/jpeg', isVideo: false };
 }
 
+function isClientValidationApiError(err: unknown): err is ApiError {
+  return err instanceof ApiError && (err.status === 401 || err.status === 413 || err.status === 422);
+}
+
 /**
  * Uploads a local photo/video via Contract B Upload-Intents (AccessMapVN-Backend)
  * or falls back to Supabase Cloud Storage / legacy backend multipart upload.
  * Returns the uploaded media URL.
  */
 async function tryUploadViaBackendIntent(
-  fileBody: Uint8Array | ArrayBuffer,
+  fileBody: Uint8Array,
+  fileSizeBytes: number,
   mimeType: string,
   isVideo: boolean,
   captureContext?: UploadCaptureContext
 ): Promise<string | null> {
+  lastUploadIntentError = null;
   const nowIso = new Date().toISOString();
   const lat = captureContext?.latitude ?? 10.7736;
   const lng = captureContext?.longitude ?? 106.7011;
   const hasLocationUuid = Boolean(
-    captureContext?.locationId && UUID_RE.test(captureContext.locationId)
+    captureContext?.locationId && UUID_V4_RE.test(captureContext.locationId)
   );
 
   try {
@@ -153,11 +160,11 @@ async function tryUploadViaBackendIntent(
     }>(
       '/api/v1/media/upload-intents',
       {
-        mediaType: isVideo ? 'video' : 'photo',
+        mediaType: isVideo ? 'Video' : 'Photo',
         contentType: mimeType,
-        fileSizeBytes: fileBody.byteLength,
+        fileSizeBytes,
         captureMetadata: {
-          source: 'Camera',
+          source: 'InAppCamera',
           capturedAt: nowIso,
           position: {
             latitude: lat,
@@ -171,17 +178,29 @@ async function tryUploadViaBackendIntent(
         },
         proposedScope: captureContext?.proposedScope ?? { kind: 'BuildingGeneral', label: 'Whole place' },
       },
-      { auth: 'optional' }
+      { auth: 'required' }
     );
 
-    if (!intent?.mediaId || !intent?.uploadUrl) return null;
+    if (!intent?.mediaId || !intent?.uploadUrl) {
+      lastUploadIntentError = 'Phản hồi cấp phép tải ảnh không hợp lệ';
+      return null;
+    }
 
     const putRes = await fetch(intent.uploadUrl, {
       method: intent.method || 'PUT',
       headers: intent.headers ?? { 'Content-Type': mimeType },
-      body: fileBody as BodyInit,
+      body: fileBody as unknown as BodyInit,
     });
-    if (!putRes.ok) return null;
+    if (!putRes.ok) {
+      const errBody = await putRes.text().catch(() => '');
+      lastUploadIntentError = `HTTP ${putRes.status} khi tải ảnh lên lưu trữ`;
+      console.warn(
+        '[tryUploadViaBackendIntent] Storage PUT failed:',
+        putRes.status,
+        errBody.slice(0, 300)
+      );
+      return null;
+    }
 
     // Best-effort owned pre-scan & AI suggestions correlation for AccessMapVN-Backend
     await apiClient
@@ -191,9 +210,12 @@ async function tryUploadViaBackendIntent(
           mediaIds: [intent.mediaId],
           textDescription: captureContext?.textDescription || undefined,
         },
-        { auth: 'optional' }
+        { auth: 'required' }
       )
-      .catch(() => null);
+      .catch((err) => {
+        if (isClientValidationApiError(err)) throw err;
+        return null;
+      });
 
     const suggRes = await apiClient
       .post<{ correlationId?: string }>(
@@ -202,9 +224,12 @@ async function tryUploadViaBackendIntent(
           mediaIds: [intent.mediaId],
           textDescription: captureContext?.textDescription || undefined,
         },
-        { auth: 'optional' }
+        { auth: 'required' }
       )
-      .catch(() => null);
+      .catch((err) => {
+        if (isClientValidationApiError(err)) throw err;
+        return null;
+      });
 
     const cleanUrl = intent.uploadUrl.split('?')[0];
     const meta: UploadedMediaMetadata = {
@@ -214,7 +239,10 @@ async function tryUploadViaBackendIntent(
     uploadedMediaMetadataByUrl.set(cleanUrl, meta);
     uploadedMediaMetadataByUrl.set(intent.mediaId, meta);
     return cleanUrl;
-  } catch {
+  } catch (err) {
+    if (isClientValidationApiError(err)) throw err;
+    lastUploadIntentError = err instanceof Error ? err.message : 'UPLOAD_INTENT_FAILED';
+    console.warn('[tryUploadViaBackendIntent] FAILED:', err);
     return null;
   }
 }
@@ -226,29 +254,48 @@ export async function uploadMediaToBackend(
 ): Promise<string> {
   const { ext, mimeType, isVideo } = getMediaFileInfo(uri);
   const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}.${ext}`;
-  const effectiveBase64 = isVideo ? undefined : await resolveBase64(uri, base64);
 
-  let binaryBody: Uint8Array | ArrayBuffer | undefined;
-  if (effectiveBase64) {
-    binaryBody = base64ToUint8Array(effectiveBase64);
-  } else {
-    try {
-      const localRes = await fetch(uri);
-      if (localRes.ok) binaryBody = await localRes.arrayBuffer();
-    } catch {
-      // Local file fetch unavailable
+  let binaryBody: Uint8Array | undefined;
+
+  try {
+    const localRes = await fetch(uri);
+    if (localRes.ok) {
+      const buffer = await localRes.arrayBuffer();
+      if (buffer.byteLength > 0) {
+        binaryBody = new Uint8Array(buffer);
+      }
+    }
+  } catch {
+    // Fallback to base64 decoding below when native file fetch is unavailable
+  }
+
+  let effectiveBase64: string | undefined;
+  if (!binaryBody) {
+    effectiveBase64 = isVideo ? undefined : await resolveBase64(uri, base64);
+    if (effectiveBase64) {
+      binaryBody = base64ToUint8Array(effectiveBase64);
     }
   }
 
-  // 0. Try AccessMapVN-Backend signed upload-intent flow when binary is readable
+  // 0. Try AccessMapVN-Backend signed upload-intent flow when media bytes are readable
   if (binaryBody && binaryBody.byteLength > 0) {
     const intentUrl = await tryUploadViaBackendIntent(
       binaryBody,
+      binaryBody.byteLength,
       mimeType,
       isVideo,
       captureContext
     );
     if (intentUrl) return intentUrl;
+  } else {
+    lastUploadIntentError = 'Không đọc được dữ liệu ảnh/video cục bộ';
+  }
+
+  if (!isVideo && !effectiveBase64) {
+    effectiveBase64 = await resolveBase64(uri, base64);
+    if (!binaryBody && effectiveBase64) {
+      binaryBody = base64ToUint8Array(effectiveBase64);
+    }
   }
 
   // 1. Try Supabase Storage first (Cloud storage accessible by everyone globally)
@@ -443,7 +490,7 @@ export async function submitContributionToBackend(
       });
     }
 
-    const hasUuidLocation = UUID_RE.test(legacyPayload.location_id);
+    const hasUuidLocation = UUID_V4_RE.test(legacyPayload.location_id);
     const resolvedConfirmation =
       !hasUuidLocation &&
       options.identityConfirmation &&
@@ -507,14 +554,9 @@ export async function submitContributionToBackend(
     }
   }
 
-  return await apiClient.post<{
-    submission_id?: string;
-    submissionId?: string;
-    submission_code?: string;
-    submissionCode?: string;
-    status?: string;
-    points_awarded?: number;
-  }>('/api/v1/submissions', legacyPayload, {
-    idempotencyKey: legacyPayload.client_submission_id,
-  });
+  throw new Error(
+    lastUploadIntentError
+      ? `Không thể tải ảnh minh chứng lên máy chủ (${lastUploadIntentError}).`
+      : 'Không thể tải ảnh minh chứng lên máy chủ lưu trữ. Vui lòng thử lại.'
+  );
 }
