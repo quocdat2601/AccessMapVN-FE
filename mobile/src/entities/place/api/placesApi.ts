@@ -1,9 +1,4 @@
 import { apiClient } from '@/shared/api/client';
-import {
-  fallbackGeocodeFromMocks,
-  fallbackReverseGeocodeFromMocks,
-} from '../lib/geocodeFallback';
-import { MOCK_S901_PLACES } from '../model/mockS901Places';
 import type { BoundingBox, GeocodeResult, PlaceDto, PoiCategory } from '../model/types';
 
 function nullableBoolean(...values: unknown[]): boolean | null {
@@ -83,19 +78,11 @@ function mapPlaceDto(p: any, defaultScoreOnHasData = 80): PlaceDto {
   };
 }
 
-function filterMockPlacesInBBox(bbox: BoundingBox): PlaceDto[] {
-  const inBox = MOCK_S901_PLACES.filter(
-    (p) => p.lat >= bbox.south && p.lat <= bbox.north && p.lng >= bbox.west && p.lng <= bbox.east
-  );
-  return inBox.length > 0 ? inBox : MOCK_S901_PLACES;
-}
-
 export async function fetchPlacesInBBox(
   bbox: BoundingBox,
   zoomLevel: number = 14,
   categories?: string[]
 ): Promise<PlaceDto[]> {
-  const mockMatches = filterMockPlacesInBBox(bbox);
   try {
     const centerLat = (bbox.north + bbox.south) / 2;
     const centerLng = (bbox.east + bbox.west) / 2;
@@ -111,7 +98,7 @@ export async function fetchPlacesInBBox(
           lat: centerLat,
           lng: centerLng,
           radiusMeters,
-          limit: 30,
+          limit: 20,
           source: 'accessmap',
         },
         auth: 'none',
@@ -131,24 +118,15 @@ export async function fetchPlacesInBBox(
       items = Array.isArray(legacyRaw) ? legacyRaw : null;
     }
 
-    if (!items) return mockMatches;
+    if (!items) return [];
 
-    const mapped = items.map((p) => mapPlaceDto(p, 80)).filter((p) => Boolean(p.id));
-    const existingIds = new Set(mapped.map((m) => m.id));
-    for (const mock of mockMatches) {
-      if (!existingIds.has(mock.id)) {
-        mapped.push(mock);
-      }
-    }
-    return mapped;
+    return items.map((p) => mapPlaceDto(p, 80)).filter((p) => Boolean(p.id));
   } catch {
-    return mockMatches;
+    return [];
   }
 }
 
 export async function fetchPlaceById(id: string): Promise<PlaceDto | null> {
-  const mockMatch = MOCK_S901_PLACES.find((m) => m.id === id);
-  if (mockMatch) return mockMatch;
   try {
     let p: any = null;
     try {
@@ -238,7 +216,7 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string |
       },
       signal: AbortSignal.timeout(3500),
     });
-    if (!res.ok) return fallbackReverseGeocodeFromMocks(lat, lng);
+    if (!res.ok) return null;
     const data = await res.json();
     const formatted = formatNominatim(data);
     if (formatted) {
@@ -249,9 +227,9 @@ export async function reverseGeocode(lat: number, lng: number): Promise<string |
       geocodeCache.set(cacheKey, formatted);
       return formatted;
     }
-    return fallbackReverseGeocodeFromMocks(lat, lng);
+    return null;
   } catch {
-    return fallbackReverseGeocodeFromMocks(lat, lng);
+    return null;
   }
 }
 
@@ -285,9 +263,9 @@ export async function forwardGeocode(
       signal: AbortSignal.timeout(2500),
     });
 
-    if (!res.ok) return fallbackGeocodeFromMocks(trimmed, limit);
+    if (!res.ok) return [];
     const data = await res.json();
-    if (!Array.isArray(data)) return fallbackGeocodeFromMocks(trimmed, limit);
+    if (!Array.isArray(data)) return [];
 
     const results: GeocodeResult[] = data.map((item: any) => ({
       id: String(item.place_id ?? `${item.lat},${item.lon}`),
@@ -299,7 +277,7 @@ export async function forwardGeocode(
     }));
 
     if (results.length === 0) {
-      return fallbackGeocodeFromMocks(trimmed, limit);
+      return [];
     }
 
     if (forwardGeocodeCache.size > 100) {
@@ -310,7 +288,7 @@ export async function forwardGeocode(
 
     return results;
   } catch {
-    return fallbackGeocodeFromMocks(trimmed, limit);
+    return [];
   }
 }
 
@@ -320,15 +298,6 @@ export async function searchAccessMapPlaces(
 ): Promise<PlaceDto[]> {
   const trimmed = query.trim();
   if (!trimmed || trimmed.length < 2) return [];
-
-  const qLower = trimmed.toLowerCase();
-  const localMocks = MOCK_S901_PLACES.filter(
-    (m) =>
-      m.name.toLowerCase().includes(qLower) ||
-      (m.address && m.address.toLowerCase().includes(qLower)) ||
-      (m.brand && m.brand.toLowerCase().includes(qLower)) ||
-      m.category.toLowerCase().includes(qLower)
-  );
 
   try {
     let items: any[] | null = null;
@@ -357,13 +326,11 @@ export async function searchAccessMapPlaces(
       items = Array.isArray(legacyRaw) ? legacyRaw : null;
     }
 
-    if (!items) return localMocks;
+    if (!items) return [];
 
-    const mapped = items.map((p) => mapPlaceDto(p, 80)).filter((p) => Boolean(p.id));
-    const existingIds = new Set(mapped.map((m) => m.id));
-    return [...localMocks.filter((m) => !existingIds.has(m.id)), ...mapped];
+    return items.map((p) => mapPlaceDto(p, 80)).filter((p) => Boolean(p.id));
   } catch {
-    return localMocks;
+    return [];
   }
 }
 

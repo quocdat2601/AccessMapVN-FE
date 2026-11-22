@@ -135,15 +135,15 @@ function isVideoMediaUrl(url?: string | null): boolean {
 function resolveEvidenceImageUrl(rawUrl?: string | null): string {
   if (!rawUrl) return '';
   if (rawUrl.startsWith('data:') || rawUrl.startsWith('file://')) return rawUrl;
-  const baseUrl = resolveServiceUrl(5256, process.env.EXPO_PUBLIC_API_URL);
+  const baseUrl = resolveServiceUrl(5267, process.env.EXPO_PUBLIC_API_URL);
   if (rawUrl.startsWith('/')) {
     return `${baseUrl}${rawUrl}`;
   }
-  if (rawUrl.startsWith('http://localhost:5256/')) {
-    return rawUrl.replace('http://localhost:5256', baseUrl);
+  if (rawUrl.startsWith('http://localhost:5267/') || rawUrl.startsWith('http://localhost:5256/')) {
+    return rawUrl.replace(/^http:\/\/localhost:(5267|5256)/, baseUrl);
   }
-  if (rawUrl.startsWith('http://127.0.0.1:5256/')) {
-    return rawUrl.replace('http://127.0.0.1:5256', baseUrl);
+  if (rawUrl.startsWith('http://127.0.0.1:5267/') || rawUrl.startsWith('http://127.0.0.1:5256/')) {
+    return rawUrl.replace(/^http:\/\/127\.0\.0\.1:(5267|5256)/, baseUrl);
   }
   return rawUrl;
 }
@@ -155,7 +155,7 @@ function buildVideoMediaUrls(rawUrl?: string | null, resolvedUrl?: string): {
   if (!resolvedUrl || resolvedUrl.startsWith('file://')) {
     return { videoUrl: resolvedUrl || undefined };
   }
-  const baseUrl = resolveServiceUrl(5256, process.env.EXPO_PUBLIC_API_URL);
+  const baseUrl = resolveServiceUrl(5267, process.env.EXPO_PUBLIC_API_URL);
   const paramUrl = rawUrl && rawUrl.startsWith('/uploads/') ? rawUrl : resolvedUrl;
   const encoded = encodeURIComponent(paramUrl);
   return {

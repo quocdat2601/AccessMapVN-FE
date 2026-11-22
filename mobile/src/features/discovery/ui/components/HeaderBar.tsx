@@ -57,7 +57,7 @@ export function HeaderBar({ onNotificationPress, onProfilePress }: HeaderBarProp
           {/* Brand Titles */}
           <View style={styles.titleContainer}>
             <Text style={styles.brandSubtitle}>{branding.appName}</Text>
-            <Text style={styles.brandTitle}>Location Gallery</Text>
+            <Text style={styles.brandTitle}>Bản đồ Tiếp cận</Text>
           </View>
         </View>
 

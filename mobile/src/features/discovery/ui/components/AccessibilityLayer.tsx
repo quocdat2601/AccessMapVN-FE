@@ -289,11 +289,11 @@ export function AccessibilityLayer({
         }}
       />
 
-      {/* 6. Rated / Verified Places: Bold Name Label (visible from zoom 12, always displayed) */}
+      {/* 6. Rated / Verified Places: Bold Name Label (visible from zoom 14 without overlap) */}
       <MapLibreGL.Layer
         type="symbol"
         id="places-rated-label"
-        minZoomLevel={12}
+        minZoomLevel={14}
         filter={['==', ['get', 'isRated'], true]}
         layout={{
           textField: ['get', 'name'],
@@ -302,8 +302,8 @@ export function AccessibilityLayer({
           textOffset: [0, 1.4],
           textAnchor: 'top',
           textMaxWidth: 10,
-          textAllowOverlap: true,
-          textIgnorePlacement: true,
+          textAllowOverlap: false,
+          textIgnorePlacement: false,
         }}
         paint={{
           textColor: '#0f172a',

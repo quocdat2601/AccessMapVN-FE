@@ -126,11 +126,11 @@ export function getDevHost(): string | null {
 }
 
 export function resolveServiceUrl(port: number, envOverride?: string): string {
-  if (envOverride?.startsWith('https://')) return envOverride.replace(/\/$/, '');
+  const trimmed = envOverride?.trim();
+  if (trimmed) return trimmed.replace(/\/$/, '');
 
   const devHost = getDevHost();
   if (devHost) return `http://${devHost}:${port}`;
-  if (envOverride) return envOverride.replace(/\/$/, '');
 
   return Platform?.OS === 'android'
     ? `http://10.0.2.2:${port}`
@@ -165,7 +165,7 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
     idempotencyKey,
     ...rest
   } = options;
-  const baseUrl = resolveServiceUrl(5256, process.env.EXPO_PUBLIC_API_URL);
+  const baseUrl = resolveServiceUrl(5267, process.env.EXPO_PUBLIC_API_URL);
   let url = `${baseUrl}${endpoint}`;
 
   if (params) {

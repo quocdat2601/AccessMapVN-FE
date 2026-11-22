@@ -280,7 +280,7 @@ export async function uploadMediaToBackend(
   }
 
   // 2. Fallback to backend upload if Supabase Storage failed or offline
-  const baseUrl = resolveServiceUrl(5256, process.env.EXPO_PUBLIC_API_URL);
+  const baseUrl = resolveServiceUrl(5267, process.env.EXPO_PUBLIC_API_URL);
   let authHeaders: Record<string, string> = {};
   try {
     const { data: sessionData } = await supabase.auth.getSession();
