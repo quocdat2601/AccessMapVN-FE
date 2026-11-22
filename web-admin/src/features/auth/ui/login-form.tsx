@@ -23,6 +23,26 @@ function resolveInitialError(configurationMissing: boolean, forbidden: boolean):
   return null;
 }
 
+function mapPortalLoginError(code?: string, status?: number): string {
+  switch (code) {
+    case "INVALID_CREDENTIALS":
+      return "Email hoặc mật khẩu quản trị không chính xác.";
+    case "AUTHORIZATION_FORBIDDEN":
+      return "Tài khoản của bạn không có quyền truy cập hệ thống quản trị.";
+    case "INVALID_LOGIN_REQUEST":
+      return "Email hoặc định dạng mật khẩu không hợp lệ.";
+    case "CSRF_VALIDATION_FAILED":
+      return "Yêu cầu bảo mật không khớp cấu hình tên miền quản trị (TrustedOrigins / HTTPS).";
+    case "PORTAL_AUTH_NOT_CONFIGURED":
+    case "AUTH_STATE_UNAVAILABLE":
+      return "Dịch vụ xác thực quản trị đang tạm gián đoạn. Vui lòng thử lại sau.";
+    default:
+      if (status === 401) return "Email hoặc mật khẩu quản trị không chính xác.";
+      if (status === 403) return "Tài khoản của bạn không có quyền truy cập hệ thống quản trị.";
+      return "Không thể đăng nhập hệ thống quản trị.";
+  }
+}
+
 export function LoginForm({
   nextPath,
   configurationMissing = false,
@@ -50,6 +70,7 @@ export function LoginForm({
 
     try {
       let portalSignedIn = false;
+      let allowSupabaseFallback = false;
       const apiBaseUrl = getApiBaseUrl();
       if (apiBaseUrl) {
         try {
@@ -73,10 +94,25 @@ export function LoginForm({
               });
               portalSignedIn = true;
             }
+          } else if (portalRes.status === 404) {
+            allowSupabaseFallback = true;
+          } else {
+            const problem = (await portalRes.json().catch(() => undefined)) as
+              | { code?: string; message?: string; title?: string }
+              | undefined;
+            setStoredPortalAuth(null);
+            throw new Error(
+              problem?.message || mapPortalLoginError(problem?.code ?? problem?.title, portalRes.status),
+            );
           }
-        } catch {
-          // Fall back to direct Supabase auth for legacy monorepo backend
+        } catch (err) {
+          if (!allowSupabaseFallback && err instanceof Error && err.name !== "TypeError") {
+            throw err;
+          }
+          allowSupabaseFallback = true;
         }
+      } else {
+        allowSupabaseFallback = true;
       }
 
       if (isSupabaseConfigured()) {

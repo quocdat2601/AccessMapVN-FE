@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
+import { logoutPortalSession } from "@/shared/api/api-client";
 import { createBrowserSupabaseClient } from "@/shared/lib/supabase/client";
 
 export interface AdminIdentity {
@@ -45,6 +46,7 @@ export function useAdminIdentity() {
   }, [supabase]);
 
   const signOut = useCallback(async () => {
+    await logoutPortalSession().catch(() => {});
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   }, [supabase]);

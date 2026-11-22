@@ -15,6 +15,38 @@ export interface StoredBackendTokens {
   expiresAt?: number;
 }
 
+type BackendAuthClearedListener = () => void;
+const backendAuthClearedListeners = new Set<BackendAuthClearedListener>();
+
+export function subscribeBackendAuthCleared(listener: BackendAuthClearedListener): () => void {
+  backendAuthClearedListeners.add(listener);
+  return () => {
+    backendAuthClearedListeners.delete(listener);
+  };
+}
+
+function notifyBackendAuthCleared() {
+  backendAuthClearedListeners.forEach((listener) => listener());
+}
+
+export function createUuidV4(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  const bytes = new Uint8Array(16);
+  if (typeof globalThis.crypto?.getRandomValues === 'function') {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export async function setStoredBackendTokens(tokens: StoredBackendTokens | null): Promise<void> {
   if (!tokens) {
     await AsyncStorage.removeItem(BACKEND_AUTH_STORAGE_KEY).catch(() => {});
@@ -23,19 +55,24 @@ export async function setStoredBackendTokens(tokens: StoredBackendTokens | null)
   await AsyncStorage.setItem(BACKEND_AUTH_STORAGE_KEY, JSON.stringify(tokens)).catch(() => {});
 }
 
-export async function getStoredBackendAccessToken(): Promise<string | null> {
+export async function getStoredBackendTokens(): Promise<StoredBackendTokens | null> {
   try {
     const raw = await AsyncStorage.getItem(BACKEND_AUTH_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as StoredBackendTokens;
-    if (!parsed?.accessToken) return null;
-    if (typeof parsed.expiresAt === 'number' && Date.now() >= parsed.expiresAt - 10_000) {
-      return null;
-    }
-    return parsed.accessToken;
+    return parsed?.accessToken ? parsed : null;
   } catch {
     return null;
   }
+}
+
+export async function getStoredBackendAccessToken(): Promise<string | null> {
+  const parsed = await getStoredBackendTokens();
+  if (!parsed?.accessToken) return null;
+  if (typeof parsed.expiresAt === 'number' && Date.now() >= parsed.expiresAt - 30_000) {
+    return null;
+  }
+  return parsed.accessToken;
 }
 
 export interface RequestOptions extends RequestInit {
@@ -143,11 +180,85 @@ function responseMessage(status: number, data: ApiErrorBody | string): string {
   return `Request failed with status ${status}`;
 }
 
+let refreshInFlight: Promise<string | null> | null = null;
+
+export async function refreshBackendAccessToken(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    try {
+      const stored = await getStoredBackendTokens();
+      if (!stored?.refreshToken) return null;
+
+      const baseUrl = resolveServiceUrl(5267, process.env.EXPO_PUBLIC_API_URL);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      let response: Response;
+      try {
+        response = await fetch(`${baseUrl}/api/v1/auth/refresh`, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'Idempotency-Key': createUuidV4(),
+          },
+          body: JSON.stringify({ refreshToken: stored.refreshToken }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403 || response.status === 422) {
+          await setStoredBackendTokens(null);
+          notifyBackendAuthCleared();
+        }
+        return null;
+      }
+
+      const data = (await response.json()) as {
+        accessToken?: string;
+        refreshToken?: string;
+        sessionId?: string;
+        expiresIn?: number;
+      };
+      if (!data?.accessToken) return null;
+
+      await setStoredBackendTokens({
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken ?? stored.refreshToken,
+        sessionId: data.sessionId ?? stored.sessionId,
+        expiresAt:
+          typeof data.expiresIn === 'number'
+            ? Date.now() + data.expiresIn * 1000
+            : stored.expiresAt,
+      });
+      return data.accessToken;
+    } catch {
+      return null;
+    } finally {
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
+}
+
 async function accessToken(auth: AuthMode): Promise<string | null> {
   if (auth === 'none') return null;
 
-  const backendToken = await getStoredBackendAccessToken();
-  if (backendToken) return backendToken;
+  const stored = await getStoredBackendTokens();
+  if (stored?.accessToken) {
+    const expiringSoon =
+      typeof stored.expiresAt === 'number' && Date.now() >= stored.expiresAt - 30_000;
+    if (!expiringSoon) return stored.accessToken;
+
+    const refreshed = await refreshBackendAccessToken();
+    if (refreshed) return refreshed;
+    if (auth === 'required') throw new AuthenticationRequiredError();
+    return null;
+  }
 
   const { data, error } = await supabase.auth.getSession();
   if (error && auth === 'required') throw new AuthenticationRequiredError();
@@ -213,6 +324,32 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
     clearTimeout(timer);
   }
 
+  if (
+    response.status === 401 &&
+    auth !== 'none' &&
+    !endpoint.startsWith('/api/v1/auth/')
+  ) {
+    const stored = await getStoredBackendTokens();
+    if (stored?.refreshToken) {
+      const refreshedToken = await refreshBackendAccessToken();
+      if (refreshedToken) {
+        const retryHeaders = new Headers(requestHeaders);
+        retryHeaders.set('Authorization', `Bearer ${refreshedToken}`);
+        const retryController = new AbortController();
+        const retryTimer = setTimeout(() => retryController.abort(), timeoutMs);
+        try {
+          response = await fetch(url, {
+            ...rest,
+            headers: retryHeaders,
+            signal: rest.signal ?? retryController.signal,
+          });
+        } finally {
+          clearTimeout(retryTimer);
+        }
+      }
+    }
+  }
+
   const rawText = await response.text();
 
   if (!response.ok) {
@@ -267,10 +404,7 @@ function fingerprint(value: unknown): string {
 }
 
 function createIdempotencyKey(): string {
-  if (typeof globalThis.crypto?.randomUUID === 'function') return globalThis.crypto.randomUUID();
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random()
-    .toString(36)
-    .slice(2)}`;
+  return createUuidV4();
 }
 
 async function pendingIdempotency(operationId: string, body: unknown): Promise<PendingIdempotency> {

@@ -116,6 +116,140 @@ function toProblem(payload: unknown): ApiProblemDetails {
   };
 }
 
+let portalRefreshPromise: Promise<StoredPortalAuth | null> | null = null;
+
+async function fetchPortalCsrfToken(apiBaseUrl: string): Promise<string | undefined> {
+  try {
+    const res = await fetch(`${apiBaseUrl}/api/v1/admin/auth/csrf`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      credentials: "include",
+      cache: "no-store",
+    });
+    if (!res.ok) return undefined;
+    const data = (await res.json().catch(() => undefined)) as { csrfToken?: string } | undefined;
+    return data?.csrfToken;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function refreshPortalAuth(): Promise<StoredPortalAuth | null> {
+  if (typeof window === "undefined") return null;
+  if (portalRefreshPromise) return portalRefreshPromise;
+
+  portalRefreshPromise = (async () => {
+    try {
+      const apiBaseUrl = getApiBaseUrl();
+      if (!apiBaseUrl) return null;
+
+      const stored = getStoredPortalAuth();
+      let csrfToken = stored?.csrfToken;
+      if (!csrfToken) {
+        csrfToken = await fetchPortalCsrfToken(apiBaseUrl);
+      }
+      if (!csrfToken) return null;
+
+      const response = await fetch(`${apiBaseUrl}/api/v1/admin/auth/refresh`, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-CSRF-TOKEN": csrfToken,
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        credentials: "include",
+        body: "{}",
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          setStoredPortalAuth(null);
+        }
+        return null;
+      }
+
+      const data = (await response.json().catch(() => undefined)) as
+        | { accessToken?: string; csrfToken?: string; sessionId?: string }
+        | undefined;
+      if (!data?.accessToken) return null;
+
+      const nextAuth: StoredPortalAuth = {
+        accessToken: data.accessToken,
+        csrfToken: data.csrfToken ?? csrfToken,
+        sessionId: data.sessionId ?? stored?.sessionId,
+      };
+      setStoredPortalAuth(nextAuth);
+      return nextAuth;
+    } catch {
+      return null;
+    } finally {
+      portalRefreshPromise = null;
+    }
+  })();
+
+  return portalRefreshPromise;
+}
+
+export async function logoutPortalSession(): Promise<void> {
+  if (typeof window === "undefined") return;
+  try {
+    const apiBaseUrl = getApiBaseUrl();
+    if (!apiBaseUrl) return;
+
+    let portalAuth = getStoredPortalAuth();
+    if (!portalAuth?.accessToken) {
+      portalAuth = await refreshPortalAuth();
+    }
+    if (!portalAuth?.accessToken) return;
+
+    let csrfToken = portalAuth.csrfToken;
+    if (!csrfToken) {
+      csrfToken = await fetchPortalCsrfToken(apiBaseUrl);
+    }
+    if (!csrfToken) return;
+
+    await fetch(`${apiBaseUrl}/api/v1/admin/auth/logout`, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${portalAuth.accessToken}`,
+        "X-CSRF-TOKEN": csrfToken,
+      },
+      credentials: "include",
+      cache: "no-store",
+    });
+  } catch {
+    // Best-effort portal session revocation before clearing local tokens.
+  } finally {
+    setStoredPortalAuth(null);
+  }
+}
+
+function buildApiHeaders(
+  options: ApiRequestOptions,
+  bearerToken: string,
+  csrfToken?: string,
+): Headers {
+  const method = (options.method ?? "GET").toUpperCase();
+  const headers = new Headers(options.headers);
+  headers.set("Accept", "application/json");
+  headers.set("Authorization", `Bearer ${bearerToken}`);
+  if (csrfToken) headers.set("X-CSRF-TOKEN", csrfToken);
+  if (options.body !== undefined) headers.set("Content-Type", "application/json");
+  if (options.etag) headers.set("If-Match", options.etag);
+  if (options.idempotencyKey) {
+    headers.set("Idempotency-Key", options.idempotencyKey);
+  } else if (
+    (method === "POST" || method === "PATCH" || method === "PUT" || method === "DELETE") &&
+    !headers.has("Idempotency-Key")
+  ) {
+    headers.set("Idempotency-Key", crypto.randomUUID());
+  }
+  return headers;
+}
+
 export async function apiRequest<T>(
   path: string,
   options: ApiRequestOptions = {},
@@ -128,7 +262,10 @@ export async function apiRequest<T>(
     });
   }
 
-  const portalAuth = getStoredPortalAuth();
+  let portalAuth = getStoredPortalAuth();
+  if (!portalAuth?.accessToken) {
+    portalAuth = await refreshPortalAuth();
+  }
   let bearerToken = portalAuth?.accessToken;
 
   if (!bearerToken) {
@@ -146,29 +283,31 @@ export async function apiRequest<T>(
     });
   }
 
-  const method = (options.method ?? "GET").toUpperCase();
-  const headers = new Headers(options.headers);
-  headers.set("Accept", "application/json");
-  headers.set("Authorization", `Bearer ${bearerToken}`);
-  if (portalAuth?.csrfToken) headers.set("X-CSRF-TOKEN", portalAuth.csrfToken);
-  if (options.body !== undefined) headers.set("Content-Type", "application/json");
-  if (options.etag) headers.set("If-Match", options.etag);
-  if (options.idempotencyKey) {
-    headers.set("Idempotency-Key", options.idempotencyKey);
-  } else if (
-    (method === "POST" || method === "PATCH" || method === "PUT" || method === "DELETE") &&
-    !headers.has("Idempotency-Key")
-  ) {
-    headers.set("Idempotency-Key", crypto.randomUUID());
-  }
+  const targetUrl = `${apiBaseUrl}${normalizePath(path)}`;
+  const serializedBody =
+    options.body === undefined ? undefined : JSON.stringify(options.body);
 
-  const response = await fetch(`${apiBaseUrl}${normalizePath(path)}`, {
+  let response = await fetch(targetUrl, {
     ...options,
-    headers,
+    headers: buildApiHeaders(options, bearerToken, portalAuth?.csrfToken),
     credentials: portalAuth ? "include" : options.credentials,
-    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+    body: serializedBody,
     cache: "no-store",
   });
+
+  if (response.status === 401 && portalAuth?.accessToken) {
+    const refreshed = await refreshPortalAuth();
+    if (refreshed?.accessToken) {
+      response = await fetch(targetUrl, {
+        ...options,
+        headers: buildApiHeaders(options, refreshed.accessToken, refreshed.csrfToken),
+        credentials: "include",
+        body: serializedBody,
+        cache: "no-store",
+      });
+    }
+  }
+
   const payload = await parsePayload(response);
 
   if (!response.ok) throw new ApiError(response.status, toProblem(payload));

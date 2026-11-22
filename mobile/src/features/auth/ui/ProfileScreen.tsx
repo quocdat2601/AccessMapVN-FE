@@ -3,12 +3,15 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -18,7 +21,6 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ContributionHistorySheet } from '@/entities/contribution';
-import { startContributionFlow } from '@/features/contribution';
 import {
   AccessibilityFilterModal,
   DEFAULT_ACCESSIBILITY_FILTERS,
@@ -27,7 +29,11 @@ import {
   type AccessibilityFilterState,
 } from '@/features/discovery/ui/components/AccessibilityFilterModal';
 import { BottomNavBar } from '@/shared/ui/BottomNavBar';
-import { saveUserAccessibilityPreferences, useAuth } from '../model/AuthProvider';
+import {
+  saveUserAccessibilityPreferences,
+  useAuth,
+  validateNameRule,
+} from '../model/AuthProvider';
 import { loadSavedFavorites, subscribeFavorites } from '../model/favoritesStorage';
 import { FavoritesModal } from './FavoritesModal';
 import { LeaderboardModal } from './LeaderboardModal';
@@ -48,7 +54,7 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
     12
   );
 
-  const { isGuest, sendPasswordReset, signOut, user, userProfile } = useAuth();
+  const { isGuest, sendPasswordReset, signOut, updateProfileName, user, userProfile } = useAuth();
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
@@ -57,6 +63,10 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
   const [showAccessibilitySettings, setShowAccessibilitySettings] = useState(false);
   const [showProfileFilterModal, setShowProfileFilterModal] = useState(false);
   const [isSavingPrefs, setIsSavingPrefs] = useState(false);
+  const [showEditProfileModal, setShowEditProfileModal] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editProfileError, setEditProfileError] = useState<string | null>(null);
+  const [isSavingProfileName, setIsSavingProfileName] = useState(false);
 
   const [savedFilters, setSavedFilters] = useState<AccessibilityFilterState>(
     DEFAULT_ACCESSIBILITY_FILTERS
@@ -117,14 +127,45 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
   }, [selectedCriteria]);
   const extraCriteriaCount = useMemo(() => {
     if (selectedCriteria.length > 3) return selectedCriteria.length - 3;
-    return 2;
+    return 0;
   }, [selectedCriteria.length]);
 
   const getInitials = (name: string) => {
-    if (!name) return 'MA';
+    if (!name) return 'TV';
     const parts = name.trim().split(/\s+/);
     if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
     return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  };
+
+  const openEditProfile = () => {
+    if (isGuest) {
+      router.push('/login' as any);
+      return;
+    }
+    setEditName(userProfile.fullName || '');
+    setEditProfileError(null);
+    setShowEditProfileModal(true);
+  };
+
+  const handleSaveProfileName = async () => {
+    const nameErr = validateNameRule(editName);
+    if (nameErr) {
+      setEditProfileError(nameErr);
+      return;
+    }
+    setIsSavingProfileName(true);
+    setEditProfileError(null);
+    try {
+      await updateProfileName(editName);
+      setShowEditProfileModal(false);
+      Alert.alert('Đã cập nhật', 'Họ và tên tài khoản đã được lưu.');
+    } catch (error) {
+      setEditProfileError(
+        error instanceof Error ? error.message : 'Không thể cập nhật họ và tên.'
+      );
+    } finally {
+      setIsSavingProfileName(false);
+    }
   };
 
   const handleSignOut = () => {
@@ -158,6 +199,10 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
       `Tài khoản: ${userProfile.email || userProfile.fullName}`,
       [
         {
+          text: 'Đổi họ và tên',
+          onPress: openEditProfile,
+        },
+        {
           text: 'Cài đặt trợ năng',
           onPress: () => setShowAccessibilitySettings(true),
         },
@@ -182,18 +227,16 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
   };
 
   const displayFullName = isGuest
-    ? 'Nguyễn Minh Anh (Khách)'
-    : userProfile.fullName || 'Nguyễn Minh Anh';
+    ? 'Khách tham quan'
+    : userProfile.fullName || 'Thành viên AccessMap';
   const displayContact = isGuest
-    ? '+84 98 ••• •842'
-    : userProfile.email || '+84 98 ••• •842';
-  const displayExpPoints = userProfile.expPoints > 0 ? userProfile.expPoints : 350;
-  const displayContributions =
-    userProfile.contributionsCount > 0 ? userProfile.contributionsCount : 18;
-  const displayTier =
-    userProfile.reputationTier && userProfile.reputationTier !== 'Tân binh'
-      ? userProfile.reputationTier
-      : 'Người kiểm định Cấp 3';
+    ? 'Chưa đăng nhập'
+    : userProfile.email || userProfile.phoneNumber || 'Chưa cập nhật liên hệ';
+  const displayExpPoints = userProfile.expPoints;
+  const displayContributions = userProfile.contributionsCount;
+  const displayTier = isGuest
+    ? 'Chế độ Khách'
+    : userProfile.reputationTier || 'Thành viên mới';
   const participationStatusLabel =
     ({
       Normal: 'Bình thường',
@@ -279,7 +322,8 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
 
             <TouchableOpacity
               style={styles.editCircleBtn}
-              onPress={handleAccountSettings}
+              onPress={openEditProfile}
+              accessibilityRole="button"
               accessibilityLabel="Chỉnh sửa hồ sơ"
               activeOpacity={0.78}
             >
@@ -342,7 +386,9 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
           <View style={styles.sparkleNoteRow}>
             <Ionicons name="sparkles-outline" size={15} color="#006874" />
             <Text style={styles.sparkleNoteText}>
-              +{extraCriteriaCount} tiêu chí khác được lưu làm mặc định khi tìm kiếm hành trình.
+              {extraCriteriaCount > 0
+                ? `+${extraCriteriaCount} tiêu chí khác được lưu làm mặc định khi tìm kiếm hành trình.`
+                : 'Các tiêu chí trên được áp dụng mặc định khi tìm kiếm hành trình.'}
             </Text>
           </View>
         </View>
@@ -489,8 +535,10 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
           >
             <Ionicons name="flag-outline" size={15} color="#004F58" />
             <Text style={styles.levelUpBannerText}>
-              Còn 2 đóng góp nữa để thăng cấp!{' '}
-              <Text style={styles.levelUpBannerLink}>Khám phá</Text>
+              {isGuest
+                ? 'Đăng nhập để tích lũy điểm uy tín! '
+                : 'Xem thứ hạng & quy tắc cộng điểm uy tín. '}
+              <Text style={styles.levelUpBannerLink}>Xem chi tiết</Text>
             </Text>
           </TouchableOpacity>
         </View>
@@ -617,17 +665,11 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
           </View>
           <TouchableOpacity
             style={styles.ctaMintButton}
-            onPress={() =>
-              startContributionFlow(router, {
-                id: 's9.01',
-                name: 'Tòa S9.01 - The Origami',
-                latitude: 10.8454,
-                longitude: 106.8373,
-              })
-            }
+            onPress={() => router.replace('/map' as any)}
+            accessibilityRole="button"
             activeOpacity={0.85}
           >
-            <Text style={styles.ctaMintButtonText}>Chụp ảnh</Text>
+            <Text style={styles.ctaMintButtonText}>Mở bản đồ</Text>
           </TouchableOpacity>
         </View>
 
@@ -639,6 +681,96 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
           </Text>
         </View>
       </ScrollView>
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={showEditProfileModal}
+        onRequestClose={() => {
+          if (!isSavingProfileName) setShowEditProfileModal(false);
+        }}
+      >
+        <KeyboardAvoidingView behavior="padding" style={styles.editModalBackdrop}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => {
+              if (!isSavingProfileName) setShowEditProfileModal(false);
+            }}
+          />
+          <View style={styles.editModalCard}>
+            <View style={styles.editModalHeader}>
+              <Text style={styles.editModalTitle}>Chỉnh sửa hồ sơ</Text>
+              <TouchableOpacity
+                accessibilityLabel="Đóng"
+                accessibilityRole="button"
+                disabled={isSavingProfileName}
+                onPress={() => setShowEditProfileModal(false)}
+                style={styles.editModalClose}
+              >
+                <Ionicons name="close" size={20} color="#475569" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.editModalBadges}>
+              {userProfile.email ? (
+                <View style={styles.verifyTag}>
+                  <Ionicons
+                    name={userProfile.emailVerified ? 'checkmark-circle' : 'mail-outline'}
+                    size={14}
+                    color="#006874"
+                  />
+                  <Text style={styles.verifyTagText} numberOfLines={1}>
+                    {userProfile.email}
+                  </Text>
+                </View>
+              ) : null}
+              {userProfile.phoneNumber ? (
+                <View style={styles.verifyTag}>
+                  <Ionicons
+                    name={userProfile.phoneVerified ? 'checkmark-circle' : 'call-outline'}
+                    size={14}
+                    color="#006874"
+                  />
+                  <Text style={styles.verifyTagText}>{userProfile.phoneNumber}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            <Text style={styles.editFieldLabel}>Họ và tên *</Text>
+            <TextInput
+              accessibilityLabel="Họ và tên"
+              autoCapitalize="words"
+              onChangeText={(text) => {
+                setEditName(text);
+                if (editProfileError) setEditProfileError(null);
+              }}
+              placeholder="Nhập họ và tên (2–100 ký tự)"
+              placeholderTextColor="#94A3B8"
+              style={styles.editNameInput}
+              value={editName}
+            />
+
+            {editProfileError ? (
+              <Text accessibilityLiveRegion="polite" style={styles.editErrorText}>
+                {editProfileError}
+              </Text>
+            ) : null}
+
+            <TouchableOpacity
+              accessibilityRole="button"
+              disabled={isSavingProfileName}
+              onPress={() => void handleSaveProfileName()}
+              style={[styles.editSaveBtn, isSavingProfileName && { opacity: 0.6 }]}
+            >
+              {isSavingProfileName ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.editSaveBtnText}>Lưu thay đổi</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
 
       <LeaderboardModal
         visible={showLeaderboard}
@@ -1184,5 +1316,92 @@ const styles = StyleSheet.create({
   },
   pressedCard: {
     opacity: 0.82,
+  },
+  editModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.52)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  editModalCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    gap: 10,
+  },
+  editModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  editModalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  editModalClose: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editModalBadges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  verifyTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#E6F8F5',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  verifyTagText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#004E58',
+    maxWidth: 260,
+  },
+  editFieldLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#334155',
+    marginTop: 4,
+  },
+  editNameInput: {
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    borderRadius: 12,
+    backgroundColor: '#F8FAF9',
+    paddingHorizontal: 14,
+    fontSize: 14.5,
+    color: '#0F172A',
+  },
+  editErrorText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#BA1A1A',
+  },
+  editSaveBtn: {
+    minHeight: 48,
+    borderRadius: 14,
+    backgroundColor: '#006874',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  editSaveBtnText: {
+    fontSize: 14.5,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
 });
