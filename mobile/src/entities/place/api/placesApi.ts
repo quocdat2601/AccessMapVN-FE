@@ -80,56 +80,102 @@ function mapPlaceDto(p: any, defaultScoreOnHasData = 80): PlaceDto {
   };
 }
 
+async function fetchSearchPage(
+  lat: number,
+  lng: number,
+  radiusMeters: number,
+  limit: number,
+  cursor?: string
+): Promise<{ items: any[]; nextCursor?: string } | null> {
+  const raw = await apiClient.get<any>('/api/v1/locations/search', {
+    params: {
+      lat,
+      lng,
+      radiusMeters,
+      limit,
+      source: 'accessmap',
+      ...(cursor ? { cursor } : {}),
+    },
+    auth: 'none',
+  });
+  const items = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : null;
+  if (!items) return null;
+  const nextCursor =
+    typeof raw?.nextCursor === 'string' && raw.nextCursor.trim() ? raw.nextCursor : undefined;
+  return { items, nextCursor };
+}
+
 export async function fetchPlacesInBBox(
   bbox: BoundingBox,
   zoomLevel: number = 14,
   categories?: string[]
 ): Promise<PlaceDto[]> {
   const PAGE_LIMIT = 20;
-  const MAX_PAGES = 2;
   const centerLat = (bbox.north + bbox.south) / 2;
   const centerLng = (bbox.east + bbox.west) / 2;
-  const radiusMeters = Math.min(
-    5000,
-    Math.max(500, Math.round((Math.abs(bbox.north - bbox.south) * 111320) / 2))
-  );
+  const latSpan = Math.abs(bbox.north - bbox.south);
+  const lngSpan = Math.abs(bbox.east - bbox.west);
 
   let items: any[] | null = null;
   try {
-    const collected: any[] = [];
-    let cursor: string | undefined;
-
-    for (let page = 0; page < MAX_PAGES; page += 1) {
-      let raw: any;
-      try {
-        raw = await apiClient.get<any>('/api/v1/locations/search', {
-          params: {
-            lat: centerLat,
-            lng: centerLng,
-            radiusMeters,
-            limit: PAGE_LIMIT,
-            source: 'accessmap',
-            ...(cursor ? { cursor } : {}),
-          },
-          auth: 'none',
-        });
-      } catch (err) {
-        if (page === 0) throw err;
-        break;
+    if (latSpan > 0.018) {
+      const points: Array<[number, number]> = [
+        [centerLat, centerLng],
+        [bbox.south + latSpan * 0.25, bbox.west + lngSpan * 0.25],
+        [bbox.south + latSpan * 0.25, bbox.west + lngSpan * 0.75],
+        [bbox.south + latSpan * 0.75, bbox.west + lngSpan * 0.25],
+        [bbox.south + latSpan * 0.75, bbox.west + lngSpan * 0.75],
+      ];
+      const quadrantRadius = Math.min(2500, Math.max(500, Math.round((latSpan * 111320) / 3)));
+      const settled = await Promise.allSettled(
+        points.map(([lat, lng]) => fetchSearchPage(lat, lng, quadrantRadius, PAGE_LIMIT))
+      );
+      const fulfilled = settled.filter(
+        (res): res is PromiseFulfilledResult<{ items: any[]; nextCursor?: string } | null> =>
+          res.status === 'fulfilled'
+      );
+      if (fulfilled.length === 0) {
+        const firstRejected = settled.find((res) => res.status === 'rejected') as
+          | PromiseRejectedResult
+          | undefined;
+        throw firstRejected?.reason ?? new Error('ALL_SEARCH_POINTS_FAILED');
       }
 
-      const pageItems = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : null;
-      if (!pageItems) {
-        if (page === 0) items = null;
-        break;
+      const collected: any[] = [];
+      let hasValidArray = false;
+      for (const res of fulfilled) {
+        if (res.value) {
+          hasValidArray = true;
+          collected.push(...res.value.items);
+        }
       }
+      items = hasValidArray ? collected : null;
+    } else {
+      const MAX_PAGES = 3;
+      const radiusMeters = Math.min(5000, Math.max(500, Math.round((latSpan * 111320) / 2)));
+      const collected: any[] = [];
+      let cursor: string | undefined;
 
-      collected.push(...pageItems);
-      items = collected;
+      for (let page = 0; page < MAX_PAGES; page += 1) {
+        let pageResult: { items: any[]; nextCursor?: string } | null;
+        try {
+          pageResult = await fetchSearchPage(centerLat, centerLng, radiusMeters, PAGE_LIMIT, cursor);
+        } catch (err) {
+          if (page === 0) throw err;
+          break;
+        }
 
-      const nextCursor = typeof raw?.nextCursor === 'string' && raw.nextCursor.trim() ? raw.nextCursor : undefined;
-      if (!nextCursor || pageItems.length < PAGE_LIMIT) break;
-      cursor = nextCursor;
+        if (!pageResult) {
+          if (page === 0) items = null;
+          break;
+        }
+
+        collected.push(...pageResult.items);
+        items = collected;
+
+        if (!pageResult.nextCursor || pageResult.items.length < PAGE_LIMIT) break;
+        cursor = pageResult.nextCursor;
+      }
     }
   } catch {
     const legacyRaw = await apiClient.get<any[]>('/api/v1/places', {
@@ -523,6 +569,21 @@ export interface PlaceEvidenceDto {
   createdAt?: string;
 }
 
+function formatApprovedFeatureTitle(featureType?: string): string {
+  switch (featureType) {
+    case 'EntranceDoor':
+      return 'Cửa vào';
+    case 'Ramp':
+      return 'Ram dốc';
+    case 'Elevator':
+      return 'Thang máy';
+    case 'AccessibleRestroom':
+      return 'Nhà vệ sinh';
+    default:
+      return featureType || 'Tiện ích tiếp cận';
+  }
+}
+
 export async function fetchPlaceEvidence(placeId: string): Promise<PlaceEvidenceDto[]> {
   try {
     try {
@@ -541,7 +602,7 @@ export async function fetchPlaceEvidence(placeId: string): Promise<PlaceEvidence
                 isVideoUrl(url);
               evidenceList.push({
                 id: String(m.mediaId ?? ''),
-                title: feat.featureType ?? 'Tiện ích tiếp cận',
+                title: formatApprovedFeatureTitle(feat.featureType),
                 subtitle: feat.qcvnSummaryText ?? 'Đối chiếu QCVN 10:2024/BXD',
                 badge: feat.currentStatus === 'Available' ? 'Đã xác minh' : 'Đang xử lý',
                 imageUrl: url,

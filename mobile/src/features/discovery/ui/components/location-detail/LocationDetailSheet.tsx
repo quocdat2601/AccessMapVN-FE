@@ -23,7 +23,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/shared/theme';
-import { loadContributionRecords, syncPendingSubmissionsWithBackend } from '@/entities/contribution';
 import { fetchPlaceEvidence } from '@/entities/place';
 import { apiClient, resolveServiceUrl } from '@/shared/api/client';
 import { useAuth } from '@/features/auth';
@@ -490,29 +489,57 @@ export function LocationDetailSheet({
     let isMounted = true;
     function getEvidenceTitle(featureTags?: string[]): string {
       if (!featureTags || featureTags.length === 0) return 'Ảnh khảo sát';
-      if (featureTags.includes('exterior_ramp_present') || featureTags.includes('ramp_slope_comfortable')) return 'Ram dốc';
-      if (featureTags.includes('door_width_ok') || featureTags.includes('door_threshold_flat')) return 'Cửa vào';
-      if (featureTags.includes('elevator_present') || featureTags.includes('elevator_accessible')) return 'Thang máy';
-      if (featureTags.includes('accessible_restroom') || featureTags.includes('restroom_accessible_stall')) return 'Nhà vệ sinh';
+      if (
+        featureTags.includes('exterior_ramp_present') ||
+        featureTags.includes('ramp_slope_comfortable') ||
+        featureTags.includes('Ramp')
+      ) return 'Ram dốc';
+      if (
+        featureTags.includes('door_width_ok') ||
+        featureTags.includes('door_threshold_flat') ||
+        featureTags.includes('EntranceDoor')
+      ) return 'Cửa vào';
+      if (
+        featureTags.includes('elevator_present') ||
+        featureTags.includes('elevator_accessible') ||
+        featureTags.includes('Elevator')
+      ) return 'Thang máy';
+      if (
+        featureTags.includes('accessible_restroom') ||
+        featureTags.includes('restroom_accessible_stall') ||
+        featureTags.includes('AccessibleRestroom')
+      ) return 'Nhà vệ sinh';
       if (featureTags.includes('tactile_paving_guiding') || featureTags.includes('tactile_paving_warning')) return 'Lối xúc giác';
       return 'Ảnh khảo sát';
     }
 
     function getEvidenceSpec(featureTags?: string[]): { tag: string; icon: string } {
       if (!featureTags || featureTags.length === 0) return { tag: 'Minh chứng tiếp cận', icon: 'check-circle-outline' };
-      if (featureTags.includes('exterior_ramp_present') || featureTags.includes('ramp_slope_comfortable')) {
+      if (
+        featureTags.includes('exterior_ramp_present') ||
+        featureTags.includes('ramp_slope_comfortable') ||
+        featureTags.includes('Ramp')
+      ) {
         return { tag: 'Ram dốc', icon: 'slope-uphill' };
       }
-      if (featureTags.includes('door_width_ok')) {
+      if (featureTags.includes('door_width_ok') || featureTags.includes('EntranceDoor')) {
         return { tag: 'Cửa ra vào', icon: 'door-open' };
       }
       if (featureTags.includes('door_threshold_flat')) {
         return { tag: 'Ngạch cửa phẳng', icon: 'ray-start-end' };
       }
-      if (featureTags.includes('elevator_present') || featureTags.includes('elevator_accessible')) {
+      if (
+        featureTags.includes('elevator_present') ||
+        featureTags.includes('elevator_accessible') ||
+        featureTags.includes('Elevator')
+      ) {
         return { tag: 'Thang máy', icon: 'elevator-passenger-outline' };
       }
-      if (featureTags.includes('accessible_restroom') || featureTags.includes('restroom_accessible_stall')) {
+      if (
+        featureTags.includes('accessible_restroom') ||
+        featureTags.includes('restroom_accessible_stall') ||
+        featureTags.includes('AccessibleRestroom')
+      ) {
         return { tag: 'WC cho xe lăn', icon: 'wheelchair-accessibility' };
       }
       if (featureTags.includes('tactile_paving_guiding') || featureTags.includes('tactile_paving_warning')) {
@@ -548,40 +575,6 @@ export function LocationDetailSheet({
             });
           }
         });
-      } catch {}
-
-      try {
-        await syncPendingSubmissionsWithBackend();
-        const localRecords = await loadContributionRecords();
-        localRecords
-          .filter(
-            (r) =>
-              r.locationId === place.id &&
-              r.mediaUri &&
-              r.status !== 'Rejected' &&
-              r.status !== 'Auto-Verified' &&
-              r.status !== 'Published'
-          )
-          .forEach((r) => {
-            const resolved = resolveEvidenceImageUrl(r.mediaUri);
-            if (resolved && !seenUrls.has(resolved)) {
-              seenUrls.add(resolved);
-              const isVideo = r.mediaType === 'video' || isVideoMediaUrl(resolved);
-              const videoUrls = isVideo ? buildVideoMediaUrls(r.mediaUri, resolved) : {};
-              items.push({
-                id: r.id,
-                title: `${getEvidenceTitle(r.featureTags)} (Chờ duyệt)`,
-                subtitle: new Date(r.createdAt).toLocaleDateString('vi-VN'),
-                badge: 'Đang chờ duyệt',
-                imageUrl: resolved,
-                mediaType: isVideo ? 'video' : 'image',
-                thumbnailUrl: isVideo ? videoUrls.thumbnailUrl : resolved,
-                videoUrl: videoUrls.videoUrl,
-                specTag: isVideo ? 'Video · Đang chờ duyệt' : 'Ảnh đóng góp · Đang chờ duyệt',
-                specIcon: 'clock-outline',
-              });
-            }
-          });
       } catch {}
 
       // Fake demo evidence for the 2 demo venues only
