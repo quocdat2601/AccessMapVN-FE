@@ -28,7 +28,7 @@ export function LoginRequiredModal({
   title = 'Yêu cầu đăng nhập',
   description,
   featureName = 'đóng góp dữ liệu tiếp cận',
-  expReward = 50,
+  expReward = 5,
   onLoginPress,
 }: LoginRequiredModalProps) {
   const router = useRouter();
@@ -43,7 +43,7 @@ export function LoginRequiredModal({
   };
 
   const defaultDescription =
-    `Để ${featureName}, bạn cần đăng nhập tài khoản nhằm bảo vệ tính xác thực của bản đồ và nhận thưởng điểm EXP.`;
+    `Để ${featureName}, bạn cần đăng nhập tài khoản nhằm bảo vệ tính xác thực của bản đồ và tích lũy điểm danh vọng & uy tín.`;
 
   return (
     <Modal
@@ -71,7 +71,7 @@ export function LoginRequiredModal({
             <View style={styles.rewardBanner}>
               <MaterialCommunityIcons name="star-circle" size={18} color="#D97706" />
               <Text style={styles.rewardText}>
-                Cộng ngay <Text style={styles.rewardBold}>+{expReward} EXP</Text> vào hồ sơ cá nhân
+                Tích lũy <Text style={styles.rewardBold}>điểm danh vọng & uy tín</Text> vào hồ sơ cá nhân
               </Text>
             </View>
           )}

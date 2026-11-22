@@ -125,7 +125,7 @@ export function ScoreCriteriaExplainer({
           </View>
 
           {/* Accurate WF-01 Moderation Tiers */}
-          <Text style={[styles.sectionHeading, { marginTop: 14 }]}>QUY TRÌNH XÉT DUYỆT & +50 EXP</Text>
+          <Text style={[styles.sectionHeading, { marginTop: 14 }]}>QUY TRÌNH XÉT DUYỆT & CỘNG ĐIỂM</Text>
           <View style={styles.tiersCard}>
             <View style={styles.tierRow}>
               <View style={styles.tierHeaderRow}>
@@ -133,7 +133,7 @@ export function ScoreCriteriaExplainer({
                 <Text style={styles.tierName}>≥ 80% (Tốt)</Text>
               </View>
               <Text style={styles.tierDesc}>
-                Minh chứng và GPS rõ ràng, đủ điều kiện gửi duyệt. Nhận +50 EXP sau khi được công bố.
+                Minh chứng và GPS rõ ràng, đủ điều kiện gửi duyệt. Nhận +2 đến +5 điểm danh vọng và +2 điểm uy tín sau khi công bố.
               </Text>
             </View>
             <View style={styles.tierRow}>

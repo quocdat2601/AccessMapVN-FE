@@ -32,10 +32,11 @@ export interface LeaderboardEntry {
 interface MyReputationResponse {
   reputationScore: number;
   reputationTier: string;
-  trustWeight: number;
-  rank?: number | null;
-  expPoints: number;
-  contributionsCount: number;
+  rankLabel: string;
+  accountStandingScore: number;
+  contributionAccuracyRate: number | null;
+  correctClaimCount: number;
+  incorrectClaimCount: number;
   recentEvents: {
     scoreType?: string;
     delta: number;
@@ -48,102 +49,102 @@ interface MyReputationResponse {
 export const FALLBACK_LEADERBOARD: LeaderboardEntry[] = [
   {
     rank: 1,
-    rankBadge: 'Quán Quân',
+    rankBadge: 'Top1',
     userId: 'demo-user-1',
     displayName: 'Nguyễn Minh Anh',
-    reputationScore: 285,
-    reputationTier: 'Kiểm định viên Ưu tú',
-    expPoints: 1850,
+    reputationScore: 120,
+    reputationTier: 'Top 1',
+    expPoints: 120,
     contributionsCount: 42,
   },
   {
     rank: 2,
-    rankBadge: 'Á Quân 1',
+    rankBadge: 'Top2',
     userId: 'demo-user-2',
     displayName: 'Trần Quốc Đạt',
-    reputationScore: 220,
-    reputationTier: 'Hạng Vàng',
-    expPoints: 1420,
+    reputationScore: 95,
+    reputationTier: 'Top 2',
+    expPoints: 95,
     contributionsCount: 35,
   },
   {
     rank: 3,
-    rankBadge: 'Á Quân 2',
+    rankBadge: 'Top3',
     userId: 'demo-user-3',
     displayName: 'Lê Hoàng Nam',
-    reputationScore: 175,
-    reputationTier: 'Hạng Bạc',
-    expPoints: 1100,
+    reputationScore: 78,
+    reputationTier: 'Top 3',
+    expPoints: 78,
     contributionsCount: 28,
   },
   {
     rank: 4,
-    rankBadge: 'Top 10',
+    rankBadge: 'Top4',
     userId: 'demo-user-4',
     displayName: 'Phạm Thu Hà',
-    reputationScore: 135,
-    reputationTier: 'Người đóng góp Tích cực',
-    expPoints: 890,
+    reputationScore: 62,
+    reputationTier: 'Top 4',
+    expPoints: 62,
     contributionsCount: 21,
   },
   {
     rank: 5,
-    rankBadge: 'Top 10',
+    rankBadge: 'Top5',
     userId: 'demo-user-5',
     displayName: 'Võ Thanh Tùng',
-    reputationScore: 98,
-    reputationTier: 'Hạng Đồng',
-    expPoints: 640,
+    reputationScore: 49,
+    reputationTier: 'Top 5',
+    expPoints: 49,
     contributionsCount: 17,
   },
   {
     rank: 6,
-    rankBadge: 'Top 10',
+    rankBadge: 'Top6',
     userId: 'demo-user-6',
     displayName: 'Đặng Ngọc Linh',
-    reputationScore: 74,
-    reputationTier: 'Hạng Đồng',
-    expPoints: 490,
+    reputationScore: 38,
+    reputationTier: 'Top 6',
+    expPoints: 38,
     contributionsCount: 13,
   },
   {
     rank: 7,
-    rankBadge: 'Top 10',
+    rankBadge: 'Top7',
     userId: 'demo-user-7',
     displayName: 'Hoàng Văn Khôi',
-    reputationScore: 56,
-    reputationTier: 'Thành viên Tích cực',
-    expPoints: 370,
+    reputationScore: 29,
+    reputationTier: 'Top 7',
+    expPoints: 29,
     contributionsCount: 10,
   },
   {
     rank: 8,
-    rankBadge: 'Top 10',
+    rankBadge: 'Top8',
     userId: 'demo-user-8',
     displayName: 'Bùi Thị Mai',
-    reputationScore: 42,
-    reputationTier: 'Thành viên Mới',
-    expPoints: 280,
+    reputationScore: 21,
+    reputationTier: 'Top 8',
+    expPoints: 21,
     contributionsCount: 7,
   },
   {
     rank: 9,
-    rankBadge: 'Top 10',
+    rankBadge: 'Top9',
     userId: 'demo-user-9',
     displayName: 'Đỗ Anh Đức',
-    reputationScore: 35,
-    reputationTier: 'Thành viên Mới',
-    expPoints: 230,
+    reputationScore: 14,
+    reputationTier: 'Top 9',
+    expPoints: 14,
     contributionsCount: 5,
   },
   {
     rank: 10,
-    rankBadge: 'Top 10',
+    rankBadge: 'Top10',
     userId: 'demo-user-10',
     displayName: 'Phan Khánh Huyền',
-    reputationScore: 28,
-    reputationTier: 'Thành viên Mới',
-    expPoints: 190,
+    reputationScore: 7,
+    reputationTier: 'Top 10',
+    expPoints: 7,
     contributionsCount: 4,
   },
 ];
@@ -270,9 +271,11 @@ function LeaderboardPodium({ top3 }: LeaderboardPodiumProps) {
             <Text style={styles.podiumName} numberOfLines={2}>{rank2.displayName}</Text>
             <View style={[styles.podiumScorePill, styles.silverScorePill]}>
               <Text style={styles.silverScoreText}>{rank2.reputationScore}</Text>
-              <Text style={styles.podiumScoreLabel}>uy tín</Text>
+              <Text style={styles.podiumScoreLabel}>danh vọng</Text>
             </View>
-            <Text style={styles.podiumSubText}>{rank2.contributionsCount} đóng góp</Text>
+            <Text style={styles.podiumSubText}>
+              {rank2.contributionsCount > 0 ? `${rank2.contributionsCount} đóng góp` : 'Đóng góp công nhận'}
+            </Text>
             {/* Step Base */}
             <View style={[styles.stepBase, styles.silverStep]}>
               <Text style={styles.silverStepNum}>2</Text>
@@ -305,10 +308,12 @@ function LeaderboardPodium({ top3 }: LeaderboardPodiumProps) {
             </Text>
             <View style={[styles.podiumScorePill, styles.goldScorePill]}>
               <Text style={styles.goldScoreText}>{rank1.reputationScore}</Text>
-              <Text style={styles.goldScoreLabel}>uy tín</Text>
+              <Text style={styles.goldScoreLabel}>danh vọng</Text>
             </View>
             <Text style={[styles.podiumSubText, styles.goldSubText]}>
-              {rank1.contributionsCount} đóng góp · {rank1.expPoints} EXP
+              {rank1.contributionsCount > 0
+                ? `${rank1.contributionsCount} đóng góp · ${rank1.reputationScore} điểm`
+                : `${rank1.reputationScore} điểm danh vọng`}
             </Text>
             {/* Step Base */}
             <View style={[styles.stepBase, styles.goldStep]}>
@@ -333,9 +338,11 @@ function LeaderboardPodium({ top3 }: LeaderboardPodiumProps) {
             <Text style={styles.podiumName} numberOfLines={2}>{rank3.displayName}</Text>
             <View style={[styles.podiumScorePill, styles.bronzeScorePill]}>
               <Text style={styles.bronzeScoreText}>{rank3.reputationScore}</Text>
-              <Text style={styles.podiumScoreLabel}>uy tín</Text>
+              <Text style={styles.podiumScoreLabel}>danh vọng</Text>
             </View>
-            <Text style={styles.podiumSubText}>{rank3.contributionsCount} đóng góp</Text>
+            <Text style={styles.podiumSubText}>
+              {rank3.contributionsCount > 0 ? `${rank3.contributionsCount} đóng góp` : 'Đóng góp công nhận'}
+            </Text>
             {/* Step Base */}
             <View style={[styles.stepBase, styles.bronzeStep]}>
               <Text style={styles.bronzeStepNum}>3</Text>
@@ -428,13 +435,25 @@ export function LeaderboardContent({ isGuest, onStartContribution }: Leaderboard
           const ownerRep = repResult.value;
           if (typeof ownerRep?.reputationPoints === 'number' || typeof ownerRep?.reputationScore === 'number') {
             const score = ownerRep.reputationPoints ?? ownerRep.reputationScore;
+            const resolvedRankLabel =
+              ownerRep.rankLabel && ownerRep.rankLabel !== 'Unranked'
+                ? String(ownerRep.rankLabel)
+                : ownerRep.rank
+                  ? `#${ownerRep.rank}`
+                  : 'Chưa xếp hạng';
             setMyRep({
               reputationScore: score,
-              reputationTier: ownerRep.rankLabel || ownerRep.rankBadge || ownerRep.reputationTier || 'Thành viên mới',
-              trustWeight: score >= 50 ? 1.5 : 1.0,
-              rank: ownerRep.rank ?? null,
-              expPoints: ownerRep.expPoints ?? score,
-              contributionsCount: Number(ownerRep.correctClaimCount ?? ownerRep.contributionsCount ?? 0),
+              reputationTier:
+                ownerRep.rankBadge ||
+                (resolvedRankLabel !== 'Chưa xếp hạng' ? resolvedRankLabel : null) ||
+                ownerRep.reputationTier ||
+                'Chưa xếp hạng',
+              rankLabel: resolvedRankLabel,
+              accountStandingScore: Number(ownerRep.accountStandingScore ?? 50),
+              contributionAccuracyRate:
+                typeof ownerRep.contributionAccuracyRate === 'number' ? ownerRep.contributionAccuracyRate : null,
+              correctClaimCount: Number(ownerRep.correctClaimCount ?? 0),
+              incorrectClaimCount: Number(ownerRep.incorrectClaimCount ?? 0),
               recentEvents: Array.isArray(ownerRep.history)
                 ? ownerRep.history.map((h: any) => ({
                     scoreType: String(h.scoreType ?? 'ReputationPoints'),
@@ -505,9 +524,10 @@ export function LeaderboardContent({ isGuest, onStartContribution }: Leaderboard
 
         {isPolicyExpanded && (
           <View style={styles.policyBody}>
-            <Text style={styles.policyLine}>• +5 điểm uy tín: Đóng góp địa điểm tiếp cận mới được công bố.</Text>
-            <Text style={styles.policyLine}>• +2 điểm uy tín: Bổ sung tiện ích mới tại địa điểm sau 30 ngày.</Text>
-            <Text style={styles.policyLine}>• Hệ số tin cậy 1.5x khi đạt từ 50 điểm uy tín (Trusted Member).</Text>
+            <Text style={styles.policyLine}>• Địa điểm mới công bố: +5 điểm danh vọng · +2 điểm uy tín.</Text>
+            <Text style={styles.policyLine}>• Bổ sung tiện ích công bố: +2 điểm danh vọng · +2 điểm uy tín.</Text>
+            <Text style={styles.policyLine}>• Báo cáo sai lệch hợp lệ: +1 điểm danh vọng · +1 điểm uy tín.</Text>
+            <Text style={styles.policyLine}>• Độ tin cậy = tỷ lệ nhận định (claim) được kiểm duyệt viên xác nhận đúng.</Text>
           </View>
         )}
       </View>
@@ -524,23 +544,30 @@ export function LeaderboardContent({ isGuest, onStartContribution }: Leaderboard
           </View>
           <View style={styles.mySummaryRow}>
             <View style={styles.myStat}>
-              <Text style={styles.myStatValue}>{myRep.rank ? `#${myRep.rank}` : '—'}</Text>
+              <Text style={styles.myStatValue}>{myRep.rankLabel}</Text>
               <Text style={styles.myStatSub}>Xếp hạng</Text>
             </View>
             <View style={styles.myStatDivider} />
             <View style={styles.myStat}>
               <Text style={[styles.myStatValue, { color: '#006874' }]}>{myRep.reputationScore}</Text>
-              <Text style={styles.myStatSub}>Điểm uy tín</Text>
+              <Text style={styles.myStatSub}>Danh vọng</Text>
             </View>
             <View style={styles.myStatDivider} />
             <View style={styles.myStat}>
-              <Text style={styles.myStatValue}>{myRep.trustWeight}x</Text>
-              <Text style={styles.myStatSub}>Hệ số tin cậy</Text>
+              <Text style={styles.myStatValue}>{myRep.accountStandingScore}/100</Text>
+              <Text style={styles.myStatSub}>Uy tín</Text>
             </View>
             <View style={styles.myStatDivider} />
             <View style={styles.myStat}>
-              <Text style={styles.myStatValue}>{myRep.contributionsCount}</Text>
-              <Text style={styles.myStatSub}>Đóng góp</Text>
+              <Text style={styles.myStatValue}>
+                {myRep.contributionAccuracyRate != null
+                  ? `${(myRep.contributionAccuracyRate <= 1
+                      ? myRep.contributionAccuracyRate * 100
+                      : myRep.contributionAccuracyRate
+                    ).toFixed(0)}%`
+                  : 'Chưa có'}
+              </Text>
+              <Text style={styles.myStatSub}>Độ tin cậy</Text>
             </View>
           </View>
         </View>
@@ -589,13 +616,14 @@ export function LeaderboardContent({ isGuest, onStartContribution }: Leaderboard
                         )}
                       </View>
                       <Text style={styles.subText}>
-                        {item.reputationTier} · {item.contributionsCount} đóng góp · {item.expPoints} EXP
+                        {item.reputationTier}
+                        {item.contributionsCount > 0 ? ` · ${item.contributionsCount} đóng góp` : ''} · {item.reputationScore} điểm
                       </Text>
                     </View>
 
                     <View style={styles.scoreCol}>
                       <Text style={styles.scoreVal}>{item.reputationScore}</Text>
-                      <Text style={styles.scoreUnit}>Uy tín</Text>
+                      <Text style={styles.scoreUnit}>Danh vọng</Text>
                     </View>
                   </View>
                 ))}

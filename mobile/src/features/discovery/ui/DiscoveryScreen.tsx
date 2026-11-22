@@ -549,7 +549,7 @@ export function DiscoveryScreen({
             <Ionicons name="camera" size={20} color={Colors.surface} />
             <Text style={styles.contributeFabText}>Đóng góp tiếp cận</Text>
             <View style={styles.contributeExpBadge}>
-              <Text style={styles.contributeExpText}>+50 EXP</Text>
+              <Text style={styles.contributeExpText}>+5 điểm</Text>
             </View>
           </TouchableOpacity>
         </View>

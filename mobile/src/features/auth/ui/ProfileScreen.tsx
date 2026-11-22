@@ -37,7 +37,8 @@ import {
 import { loadSavedFavorites, subscribeFavorites } from '../model/favoritesStorage';
 import { FavoritesModal } from './FavoritesModal';
 import { LeaderboardModal } from './LeaderboardModal';
-import { AccessibilitySettingsModal } from '@/features/accessibility';
+import { AccessibilitySettingsModal, useAccessibility } from '@/features/accessibility';
+import { useToast } from '@/shared/ui/ToastProvider';
 
 const DEFAULT_CHIP_LABELS = ['Lối đi không bậc', 'Lối vào rộng >90cm', 'Thang máy'];
 
@@ -54,7 +55,9 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
     12
   );
 
-  const { isGuest, sendPasswordReset, signOut, updateProfileName, user, userProfile } = useAuth();
+  const { triggerHaptic } = useAccessibility();
+  const { showToast } = useToast();
+  const { isGuest, refreshProfile, sendPasswordReset, signOut, updateProfileName, user, userProfile } = useAuth();
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
@@ -96,6 +99,12 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
       active = false;
     };
   }, [isGuest]);
+
+  useEffect(() => {
+    if (!isGuest) {
+      void refreshProfile();
+    }
+  }, [isGuest, refreshProfile]);
 
   useEffect(() => {
     return subscribeFavorites((items) => {
@@ -158,7 +167,8 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
     try {
       await updateProfileName(editName);
       setShowEditProfileModal(false);
-      Alert.alert('Đã cập nhật', 'Họ và tên tài khoản đã được lưu.');
+      triggerHaptic(30);
+      showToast({ message: 'Đã cập nhật họ và tên tài khoản.', variant: 'success' });
     } catch (error) {
       setEditProfileError(
         error instanceof Error ? error.message : 'Không thể cập nhật họ và tên.'
@@ -178,6 +188,8 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
           setIsSigningOut(true);
           try {
             await signOut();
+            triggerHaptic(25);
+            showToast({ message: 'Đã đăng xuất khỏi tài khoản.', variant: 'info' });
             router.replace('/map' as any);
           } catch (error) {
             Alert.alert('Lỗi', error instanceof Error ? error.message : 'Không thể đăng xuất.');
@@ -236,7 +248,7 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
   const displayContributions = userProfile.contributionsCount;
   const displayTier = isGuest
     ? 'Chế độ Khách'
-    : userProfile.reputationTier || 'Thành viên mới';
+    : userProfile.reputationTier || 'Chưa xếp hạng';
   const participationStatusLabel =
     ({
       Normal: 'Bình thường',
@@ -339,7 +351,7 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
             >
               <Ionicons name="log-in-outline" size={17} color="#004F58" />
               <Text style={styles.guestLoginBannerText}>
-                Đăng nhập để đồng bộ hồ sơ tiếp cận & tích lũy điểm thưởng
+                Đăng nhập để đồng bộ hồ sơ tiếp cận & tích lũy uy tín, danh vọng
               </Text>
               <Ionicons name="chevron-forward" size={16} color="#004F58" />
             </TouchableOpacity>
@@ -437,14 +449,14 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
           <Ionicons name="chevron-forward" size={16} color="#64748B" />
         </Pressable>
 
-        {/* 3. Điểm thưởng & danh tiếng Card */}
+        {/* 3. Uy tín & Danh vọng đóng góp Card */}
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
             <View style={styles.cardHeaderLeft}>
               <View style={styles.mintCircleIcon}>
                 <MaterialCommunityIcons name="medal-outline" size={19} color="#004F58" />
               </View>
-              <Text style={styles.cardTitle}>Điểm thưởng & danh tiếng</Text>
+              <Text style={styles.cardTitle}>Uy tín & Danh vọng đóng góp</Text>
             </View>
             <TouchableOpacity
               style={styles.cardLinkBtn}
@@ -456,10 +468,10 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
             </TouchableOpacity>
           </View>
 
-          {/* Sub-box 1: Điểm thưởng khả dụng */}
+          {/* Sub-box 1: Danh vọng xếp hạng */}
           <View style={styles.rewardInnerBox}>
             <View style={styles.rewardBoxTopRow}>
-              <Text style={styles.rewardBoxLabelTeal}>Điểm thưởng khả dụng</Text>
+              <Text style={styles.rewardBoxLabelTeal}>Danh vọng xếp hạng</Text>
               <MaterialCommunityIcons name="star-circle-outline" size={18} color="#006874" />
             </View>
             <View style={styles.pointsHeroRow}>
@@ -468,14 +480,16 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
             </View>
             <View style={styles.rewardBoxFootRow}>
               <MaterialCommunityIcons name="star-outline" size={14} color="#006874" />
-              <Text style={styles.rewardBoxFootText}>Tích luỹ từ các đóng góp tiếp cận chính xác.</Text>
+              <Text style={styles.rewardBoxFootText}>
+                Địa điểm mới +5 · Bổ sung +2 · Báo cáo hợp lệ +1.
+              </Text>
             </View>
           </View>
 
-          {/* Sub-box 2: Danh tiếng đóng góp */}
+          {/* Sub-box 2: Thứ hạng cộng đồng */}
           <View style={styles.rewardInnerBox}>
             <View style={styles.rewardBoxTopRow}>
-              <Text style={styles.rewardBoxLabelGray}>Danh tiếng đóng góp</Text>
+              <Text style={styles.rewardBoxLabelGray}>Thứ hạng cộng đồng</Text>
               <MaterialCommunityIcons name="seal-variant" size={18} color="#475569" />
             </View>
             <View style={styles.tierNameRow}>
@@ -485,40 +499,49 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
             <View style={styles.rewardBoxFootRow}>
               <MaterialCommunityIcons name="check-decagram-outline" size={14} color="#006874" />
               <Text style={styles.rewardBoxFootText}>
-                Dựa trên {displayContributions} lượt xác minh chuẩn xác.
+                {displayContributions > 0
+                  ? `Dựa trên ${userProfile.correctClaimCount}/${displayContributions} nhận định đã kiểm chứng.`
+                  : 'Dựa trên điểm danh vọng từ đóng góp đã công bố.'}
               </Text>
             </View>
           </View>
 
           {/* Sub-box 3: 3 chỉ số độc lập WF-04 */}
           <View style={[styles.rewardInnerBox, { gap: 8 }]}>
-            <Text style={styles.rewardBoxLabelGray}>Chỉ số uy tín tài khoản</Text>
+            <Text style={styles.rewardBoxLabelGray}>3 chỉ số WF-04 độc lập</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
               <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 10, padding: 8 }}>
-                <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Chấp hành</Text>
+                <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Uy tín tài khoản</Text>
                 <Text style={{ fontSize: 15, fontWeight: '800', color: '#004F58', marginTop: 2 }}>
                   {userProfile.accountStandingScore}/100
                 </Text>
                 <Text style={{ fontSize: 10, color: '#475569' }}>{participationStatusLabel}</Text>
               </View>
               <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 10, padding: 8 }}>
-                <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Độ chính xác</Text>
-                <Text style={{ fontSize: 15, fontWeight: '800', color: '#0F172A', marginTop: 2 }}>
+                <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Độ tin cậy</Text>
+                <Text
+                  style={{
+                    fontSize: userProfile.contributionAccuracyRate != null ? 15 : 12.5,
+                    fontWeight: '800',
+                    color: '#0F172A',
+                    marginTop: 2,
+                  }}
+                >
                   {userProfile.contributionAccuracyRate != null
                     ? `${(userProfile.contributionAccuracyRate <= 1
                         ? userProfile.contributionAccuracyRate * 100
                         : userProfile.contributionAccuracyRate
                       ).toFixed(0)}%`
-                    : '—'}
+                    : 'Chưa đủ dữ liệu'}
                 </Text>
                 <Text style={{ fontSize: 10, color: '#475569' }}>
                   {userProfile.correctClaimCount} đúng / {userProfile.incorrectClaimCount} sai
                 </Text>
               </View>
               <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 10, padding: 8 }}>
-                <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Xếp hạng</Text>
+                <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Danh vọng</Text>
                 <Text style={{ fontSize: 15, fontWeight: '800', color: '#B45309', marginTop: 2 }}>
-                  {displayExpPoints}
+                  {displayExpPoints} điểm
                 </Text>
                 <Text style={{ fontSize: 10, color: '#475569' }} numberOfLines={2}>
                   {displayTier}
@@ -786,7 +809,12 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
 
       <ContributionHistorySheet
         visible={showContributionHistory}
-        onClose={() => setShowContributionHistory(false)}
+        onClose={() => {
+          setShowContributionHistory(false);
+          if (!isGuest) {
+            void refreshProfile();
+          }
+        }}
       />
 
       <AccessibilitySettingsModal

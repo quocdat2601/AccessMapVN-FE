@@ -457,7 +457,7 @@ export function ReportFormModal({
       Alert.alert(
         'Đã gửi báo cáo',
         evidence
-          ? 'Báo cáo mâu thuẫn kèm minh chứng ảnh & phân tích AI đã được ghi nhận thành công (+30 EXP).'
+          ? 'Báo cáo mâu thuẫn kèm minh chứng ảnh & phân tích AI đã được ghi nhận (+1 danh vọng & +1 uy tín khi xác nhận hợp lệ).'
           : 'Báo cáo đã được ghi nhận. Quản trị viên sẽ sớm kiểm tra và xác thực.',
         [{ text: 'Đóng', style: 'default' }]
       );
@@ -612,7 +612,7 @@ export function ReportFormModal({
               <Text style={styles.stepTitle}>4. Thêm bằng chứng</Text>
               <View style={styles.rewardBadge}>
                 <MaterialCommunityIcons name="star-circle" size={13} color="#007D78" />
-                <Text style={styles.rewardBadgeText}>+30 điểm thưởng</Text>
+                <Text style={styles.rewardBadgeText}>+1 danh vọng · +1 uy tín</Text>
               </View>
             </View>
             <View style={styles.evidenceBtnRow}>

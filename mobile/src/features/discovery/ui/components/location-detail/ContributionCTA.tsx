@@ -38,7 +38,7 @@ export function ContributionCTA({
           </Text>
           {!showReportIssue ? (
             <View style={styles.expBadge}>
-              <Text style={styles.expBadgeText}>+50 EXP</Text>
+              <Text style={styles.expBadgeText}>+2~5 điểm</Text>
             </View>
           ) : null}
         </TouchableOpacity>
@@ -66,7 +66,7 @@ export function ContributionCTA({
         <MaterialCommunityIcons name="star-circle" size={16} color="#007D78" />
         <Text style={styles.note}>
           Chụp ảnh hoặc quay video 5–10s để bổ sung bằng chứng thực tế • Nhận{' '}
-          <Text style={styles.reward}>+50 điểm thưởng cộng đồng</Text>
+          <Text style={styles.reward}>+2 đến +5 điểm danh vọng & +2 uy tín</Text>
         </Text>
       </View>
     </View>
