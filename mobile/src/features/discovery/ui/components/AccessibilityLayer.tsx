@@ -173,28 +173,49 @@ export function AccessibilityLayer({
         }
       }}
     >
-      {/* 1. Unrated places: Subtle dots at zoom >= 13 */}
+      {/* 1. Unrated places: Secondary white-and-slate pin at zoom >= 13 */}
       <MapLibreGL.Layer
         type="circle"
         id="places-unrated-dot"
         minZoomLevel={13}
-        filter={['==', ['get', 'isRated'], false]}
+        filter={['all', ['==', ['get', 'isRated'], false], ['!=', ['get', 'isSelected'], true]]}
         paint={{
           circleRadius: [
             'interpolate',
             ['linear'],
             ['zoom'],
-            13, 3.5,
-            16, 6,
+            13, 5,
+            15, 7,
+            17, 9,
           ],
-          circleColor: '#94a3b8',
-          circleOpacity: 0.85,
-          circleStrokeWidth: 1.5,
-          circleStrokeColor: '#ffffff',
+          circleColor: '#ffffff',
+          circleOpacity: 0.96,
+          circleStrokeWidth: 2,
+          circleStrokeColor: '#475569',
         }}
       />
 
-      {/* 2. Unrated places label: subtle gray name at zoom >= 15 */}
+      {/* 1b. Unrated places: Inner slate center dot */}
+      <MapLibreGL.Layer
+        type="circle"
+        id="places-unrated-center"
+        minZoomLevel={13}
+        filter={['all', ['==', ['get', 'isRated'], false], ['!=', ['get', 'isSelected'], true]]}
+        paint={{
+          circleRadius: [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            13, 2.2,
+            15, 3.2,
+            17, 4,
+          ],
+          circleColor: '#64748b',
+          circleOpacity: 1,
+        }}
+      />
+
+      {/* 2. Unrated places label: high-contrast slate name at zoom >= 15 */}
       <MapLibreGL.Layer
         type="symbol"
         id="places-unrated-symbols"
@@ -202,7 +223,7 @@ export function AccessibilityLayer({
         filter={['==', ['get', 'isRated'], false]}
         layout={{
           textField: ['get', 'name'],
-          textSize: 10,
+          textSize: 10.5,
           textFont: ['Noto Sans Regular'],
           textOffset: [0, 1.2],
           textAnchor: 'top',
@@ -211,9 +232,9 @@ export function AccessibilityLayer({
           textAllowOverlap: false,
         }}
         paint={{
-          textColor: '#64748b',
+          textColor: '#334155',
           textHaloColor: '#ffffff',
-          textHaloWidth: 1.5,
+          textHaloWidth: 1.8,
           textHaloBlur: 0.5,
         }}
       />

@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
 import { reverseGeocode, type PlaceDto } from '@/entities/place';
 import type { LocationPoi, MapRegion } from '../../model';
@@ -232,6 +232,12 @@ export const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   }), [userLatitude, userLongitude, onHeadingChange]);
 
   const currentResolvingId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedPlaceId && !selectedPlace) {
+      currentResolvingId.current = null;
+    }
+  }, [selectedPlaceId, selectedPlace]);
 
   const handleSelectAppPlace = async (placeId: string, immediateAddr?: string | null) => {
     if (currentResolvingId.current === placeId) return;

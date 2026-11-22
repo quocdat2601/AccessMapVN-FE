@@ -39,7 +39,7 @@ export function useNearbyPlaces(bbox: BoundingBox | null) {
     setError(null);
     try {
       const data = await fetchPlacesInBBox(bufferedBox);
-      lastFetchedBox.current = bufferedBox;
+      lastFetchedBox.current = data.length >= 40 ? box : bufferedBox;
 
       // Accumulative merge: keep existing loaded places so they never disappear or flash while panning
       data.forEach((p) => cacheRef.current.set(p.id, p));
@@ -56,7 +56,8 @@ export function useNearbyPlaces(bbox: BoundingBox | null) {
 
       setPlaces(Array.from(cacheRef.current.values()));
     } catch {
-      // Keep existing cached places on transient network failure
+      // Keep existing cached places and retry on next region change
+      setError('Không thể tải địa điểm gần đây');
     } finally {
       setLoading(false);
     }

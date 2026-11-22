@@ -1,3 +1,5 @@
+import * as Location from 'expo-location';
+import { Platform } from 'react-native';
 import { apiClient } from '@/shared/api/client';
 import type { BoundingBox, GeocodeResult, PlaceDto, PoiCategory } from '../model/types';
 
@@ -83,47 +85,76 @@ export async function fetchPlacesInBBox(
   zoomLevel: number = 14,
   categories?: string[]
 ): Promise<PlaceDto[]> {
+  const PAGE_LIMIT = 20;
+  const MAX_PAGES = 2;
+  const centerLat = (bbox.north + bbox.south) / 2;
+  const centerLng = (bbox.east + bbox.west) / 2;
+  const radiusMeters = Math.min(
+    5000,
+    Math.max(500, Math.round((Math.abs(bbox.north - bbox.south) * 111320) / 2))
+  );
+
+  let items: any[] | null = null;
   try {
-    const centerLat = (bbox.north + bbox.south) / 2;
-    const centerLng = (bbox.east + bbox.west) / 2;
-    const radiusMeters = Math.min(
-      5000,
-      Math.max(500, Math.round((Math.abs(bbox.north - bbox.south) * 111320) / 2))
-    );
+    const collected: any[] = [];
+    let cursor: string | undefined;
 
-    let items: any[] | null = null;
-    try {
-      const raw = await apiClient.get<any>('/api/v1/locations/search', {
-        params: {
-          lat: centerLat,
-          lng: centerLng,
-          radiusMeters,
-          limit: 20,
-          source: 'accessmap',
-        },
-        auth: 'none',
-      });
-      items = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : null;
-    } catch {
-      const legacyRaw = await apiClient.get<any[]>('/api/v1/places', {
-        params: {
-          minLng: bbox.west,
-          minLat: bbox.south,
-          maxLng: bbox.east,
-          maxLat: bbox.north,
-          zoomLevel,
-          categories: categories?.join(','),
-        },
-      });
-      items = Array.isArray(legacyRaw) ? legacyRaw : null;
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      let raw: any;
+      try {
+        raw = await apiClient.get<any>('/api/v1/locations/search', {
+          params: {
+            lat: centerLat,
+            lng: centerLng,
+            radiusMeters,
+            limit: PAGE_LIMIT,
+            source: 'accessmap',
+            ...(cursor ? { cursor } : {}),
+          },
+          auth: 'none',
+        });
+      } catch (err) {
+        if (page === 0) throw err;
+        break;
+      }
+
+      const pageItems = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : null;
+      if (!pageItems) {
+        if (page === 0) items = null;
+        break;
+      }
+
+      collected.push(...pageItems);
+      items = collected;
+
+      const nextCursor = typeof raw?.nextCursor === 'string' && raw.nextCursor.trim() ? raw.nextCursor : undefined;
+      if (!nextCursor || pageItems.length < PAGE_LIMIT) break;
+      cursor = nextCursor;
     }
-
-    if (!items) return [];
-
-    return items.map((p) => mapPlaceDto(p, 80)).filter((p) => Boolean(p.id));
   } catch {
-    return [];
+    const legacyRaw = await apiClient.get<any[]>('/api/v1/places', {
+      params: {
+        minLng: bbox.west,
+        minLat: bbox.south,
+        maxLng: bbox.east,
+        maxLat: bbox.north,
+        zoomLevel,
+        categories: categories?.join(','),
+      },
+    });
+    items = Array.isArray(legacyRaw) ? legacyRaw : null;
   }
+
+  if (!items) return [];
+
+  const deduped = new Map<string, PlaceDto>();
+  for (const rawItem of items) {
+    const mapped = mapPlaceDto(rawItem, 80);
+    if (mapped.id && !deduped.has(mapped.id)) {
+      deduped.set(mapped.id, mapped);
+    }
+  }
+  return Array.from(deduped.values());
 }
 
 export async function fetchPlaceById(id: string): Promise<PlaceDto | null> {
@@ -144,6 +175,39 @@ export async function fetchPlaceById(id: string): Promise<PlaceDto | null> {
 }
 
 const geocodeCache = new Map<string, string>();
+const geocodeInFlight = new Map<string, Promise<string | null>>();
+
+const LEADING_PLUS_CODE_RE = /^[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,3},?\s*/i;
+const EXACT_PLUS_CODE_RE = /^[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,3}$/i;
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+  externalSignal?: AbortSignal
+): Promise<Response> {
+  const controller = new AbortController();
+  const onExternalAbort = () => controller.abort();
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+  }
+
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
+  }
+}
 
 function cleanDisplayName(raw: string): string {
   if (!raw) return '';
@@ -151,6 +215,60 @@ function cleanDisplayName(raw: string): string {
     .replace(/,\s*\d{5,6}/g, '')
     .replace(/,\s*Việt Nam$/i, '')
     .trim();
+}
+
+function formatNativeGeocode(geo: Location.LocationGeocodedAddress): string | null {
+  if (geo.formattedAddress) {
+    const cleanedFormatted = cleanDisplayName(geo.formattedAddress.replace(LEADING_PLUS_CODE_RE, ''));
+    if (cleanedFormatted.includes(',')) {
+      return cleanedFormatted;
+    }
+  }
+
+  const streetNumber = geo.streetNumber?.trim() ?? '';
+  const street = geo.street?.trim() ?? '';
+  const combinedStreet = [streetNumber, street].filter(Boolean).join(' ').trim();
+  const safeName = geo.name?.trim() ?? '';
+  const fallbackName = safeName && !EXACT_PLUS_CODE_RE.test(safeName) ? safeName : '';
+  const streetPart = combinedStreet || fallbackName;
+
+  const candidates = [streetPart, geo.district, geo.subregion, geo.city || geo.region];
+  const parts: string[] = [];
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim();
+    if (trimmed && !parts.some((existing) => existing.toLowerCase() === trimmed.toLowerCase())) {
+      parts.push(trimmed);
+    }
+  }
+
+  return parts.length > 0 ? parts.join(', ') : null;
+}
+
+function raceFirstNonEmpty(tasks: Array<Promise<string | null>>): Promise<string | null> {
+  if (tasks.length === 0) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let settledCount = 0;
+    let done = false;
+
+    for (const task of tasks) {
+      task
+        .then((value) => {
+          const trimmed = typeof value === 'string' ? value.trim() : '';
+          if (!done && trimmed) {
+            done = true;
+            resolve(trimmed);
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          settledCount += 1;
+          if (!done && settledCount === tasks.length) {
+            done = true;
+            resolve(null);
+          }
+        });
+    }
+  });
 }
 
 function formatNominatim(data: any): string {
@@ -176,61 +294,86 @@ function formatNominatim(data: any): string {
 
 export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
   const cacheKey = `${lat.toFixed(4)},${lng.toFixed(4)}`;
-  if (geocodeCache.has(cacheKey)) {
-    return geocodeCache.get(cacheKey)!;
-  }
+  const cached = geocodeCache.get(cacheKey);
+  if (cached) return cached;
 
-  try {
-    const photonRes = await fetch(`https://photon.komoot.io/reverse?lat=${lat}&lon=${lng}`, {
-      headers: { 'User-Agent': 'AccessMapVN/1.0' },
-      signal: AbortSignal.timeout(900),
-    });
-    if (photonRes.ok) {
-      const data = await photonRes.json();
-      const p = data?.features?.[0]?.properties;
-      if (p) {
-        const num = p.housenumber ? `${p.housenumber} ` : '';
-        const street = p.street || p.name || '';
-        const streetPart = `${num}${street}`.trim();
-        const locality = p.locality || '';
-        const district = p.district && p.district !== locality ? p.district : '';
-        const city = p.city || p.state || '';
-        const parts = [streetPart, locality, district, city].filter(Boolean);
-        if (parts.length >= 2) {
-          const formatted = parts.join(', ');
-          geocodeCache.set(cacheKey, formatted);
-          return formatted;
+  const existing = geocodeInFlight.get(cacheKey);
+  if (existing) return existing;
+
+  const pending = (async () => {
+    const httpAbort = new AbortController();
+    try {
+      const tasks: Array<Promise<string | null>> = [];
+
+      if (Platform?.OS === 'android' || Platform?.OS === 'ios') {
+        tasks.push(
+          Location.reverseGeocodeAsync({ latitude: lat, longitude: lng })
+            .then((list) => (list?.[0] ? formatNativeGeocode(list[0]) : null))
+            .catch(() => null)
+        );
+      }
+
+      tasks.push(
+        fetchWithTimeout(
+          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,
+          {
+            headers: {
+              'User-Agent': 'AccessMapVN/1.0 (https://accessmap.vn)',
+              'Accept-Language': 'vi,en;q=0.9',
+            },
+          },
+          2500,
+          httpAbort.signal
+        )
+          .then(async (res) => {
+            if (!res.ok) return null;
+            const data = await res.json();
+            return formatNominatim(data) || null;
+          })
+          .catch(() => null)
+      );
+
+      tasks.push(
+        fetchWithTimeout(
+          `https://photon.komoot.io/reverse?lat=${lat}&lon=${lng}`,
+          { headers: { 'User-Agent': 'AccessMapVN/1.0' } },
+          2500,
+          httpAbort.signal
+        )
+          .then(async (res) => {
+            if (!res.ok) return null;
+            const data = await res.json();
+            const p = data?.features?.[0]?.properties;
+            if (!p) return null;
+            const num = p.housenumber ? `${p.housenumber} ` : '';
+            const street = p.street || p.name || '';
+            const streetPart = `${num}${street}`.trim();
+            const locality = p.locality || '';
+            const district = p.district && p.district !== locality ? p.district : '';
+            const city = p.city || p.state || '';
+            const parts = [streetPart, locality, district, city].filter(Boolean);
+            return parts.length >= 2 ? parts.join(', ') : null;
+          })
+          .catch(() => null)
+      );
+
+      const formatted = await raceFirstNonEmpty(tasks);
+      if (formatted) {
+        if (geocodeCache.size > 200) {
+          const firstKey = geocodeCache.keys().next().value;
+          if (firstKey) geocodeCache.delete(firstKey);
         }
+        geocodeCache.set(cacheKey, formatted);
       }
-    }
-  } catch {
-    // Fallback to Nominatim
-  }
-
-  try {
-    const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`;
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'AccessMapVN/1.0 (https://accessmap.vn)',
-        'Accept-Language': 'vi,en;q=0.9',
-      },
-      signal: AbortSignal.timeout(3500),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const formatted = formatNominatim(data);
-    if (formatted) {
-      if (geocodeCache.size > 200) {
-        const firstKey = geocodeCache.keys().next().value;
-        if (firstKey) geocodeCache.delete(firstKey);
-      }
-      geocodeCache.set(cacheKey, formatted);
       return formatted;
+    } finally {
+      httpAbort.abort();
+      geocodeInFlight.delete(cacheKey);
     }
-    return null;
-  } catch {
-    return null;
-  }
+  })();
+
+  geocodeInFlight.set(cacheKey, pending);
+  return pending;
 }
 
 const forwardGeocodeCache = new Map<string, GeocodeResult[]>();
@@ -255,13 +398,16 @@ export async function forwardGeocode(
       url += `&viewbox=${options.lng - d},${options.lat + d},${options.lng + d},${options.lat - d}`;
     }
 
-    const res = await fetch(url, {
-      headers: {
-        'User-Agent': 'AccessMapVN/1.0 (https://accessmap.vn)',
-        'Accept-Language': 'vi,en;q=0.9',
+    const res = await fetchWithTimeout(
+      url,
+      {
+        headers: {
+          'User-Agent': 'AccessMapVN/1.0 (https://accessmap.vn)',
+          'Accept-Language': 'vi,en;q=0.9',
+        },
       },
-      signal: AbortSignal.timeout(2500),
-    });
+      2500
+    );
 
     if (!res.ok) return [];
     const data = await res.json();
