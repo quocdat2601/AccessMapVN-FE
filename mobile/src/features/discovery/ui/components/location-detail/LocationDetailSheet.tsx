@@ -2,6 +2,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  Linking,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -733,6 +735,37 @@ export function LocationDetailSheet({
     [myCommentsStorageKey]
   );
 
+  const handleOpenDirections = useCallback(async () => {
+    if (place.lat == null || place.lng == null) {
+      Alert.alert('Không có tọa độ', 'Địa điểm này chưa có thông tin tọa độ để chỉ đường.');
+      return;
+    }
+    const lat = place.lat;
+    const lng = place.lng;
+    const label = encodeURIComponent(place.name || 'Địa điểm');
+
+    const scheme = Platform.select({
+      ios: `maps:0,0?q=${label}@${lat},${lng}`,
+      android: `geo:0,0?q=${lat},${lng}(${label})`,
+    });
+    const fallbackUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+
+    try {
+      if (scheme) {
+        const supported = await Linking.canOpenURL(scheme);
+        if (supported) {
+          await Linking.openURL(scheme);
+          return;
+        }
+      }
+      await Linking.openURL(fallbackUrl);
+    } catch {
+      await Linking.openURL(fallbackUrl).catch(() => {
+        Alert.alert('Lỗi', 'Không thể mở ứng dụng bản đồ chỉ đường.');
+      });
+    }
+  }, [place.lat, place.lng, place.name]);
+
   const dismissSheet = useCallback(() => {
     translateY.value = withTiming(sheetHeight, { duration: 220 }, (finished) => {
       if (finished) runOnJS(onClose)();
@@ -841,6 +874,7 @@ export function LocationDetailSheet({
               website={place.website}
               isFavorite={isFavorite}
               onToggleFavorite={onToggleFavorite ? () => onToggleFavorite(place) : undefined}
+              onOpenDirections={handleOpenDirections}
               onClose={dismissSheet}
             />
 

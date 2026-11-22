@@ -15,6 +15,7 @@ interface LocationHeaderProps {
   website?: string | null;
   isFavorite?: boolean;
   onToggleFavorite?: () => void;
+  onOpenDirections?: () => void;
   onClose?: () => void;
 }
 
@@ -31,6 +32,7 @@ export function LocationHeader({
   website,
   isFavorite = false,
   onToggleFavorite,
+  onOpenDirections,
   onClose,
 }: LocationHeaderProps) {
   const hasCustomName = name && name.trim().length > 0 && name.trim().toLowerCase() !== address?.trim().toLowerCase();
@@ -43,8 +45,26 @@ export function LocationHeader({
       {/* Title & Action Buttons Row */}
       <View style={styles.titleRow}>
         <Text style={styles.name} numberOfLines={2}>{displayName}</Text>
-        {(onToggleFavorite || onClose) ? (
+        {(onOpenDirections || onToggleFavorite || onClose) ? (
           <View style={styles.headerActions}>
+            {onOpenDirections ? (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.directionsButton,
+                  pressed && styles.actionPressed,
+                ]}
+                onPress={onOpenDirections}
+                accessibilityRole="button"
+                accessibilityLabel="Chỉ đường đến địa điểm này"
+                hitSlop={4}
+              >
+                <MaterialCommunityIcons
+                  name="directions"
+                  size={20}
+                  color="#0284C7"
+                />
+              </Pressable>
+            ) : null}
             {onToggleFavorite ? (
               <Pressable
                 style={({ pressed }) => [
@@ -184,6 +204,14 @@ const styles = StyleSheet.create({
   },
   actionPressed: {
     opacity: 0.78,
+  },
+  directionsButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#E0F2FE',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   bookmarkButton: {
     width: 40,
