@@ -141,9 +141,9 @@ export function CommunityReviewsSection({
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.cardsContainer}
         >
-          {displayReviews.map((rev) => (
+          {displayReviews.map((rev, idx) => (
             <TouchableOpacity
-              key={rev.id}
+              key={`${rev.id || 'rev'}-${idx}`}
               style={[styles.card, rev.status === 'PendingReview' && styles.pendingCard]}
               onPress={onViewAll}
               activeOpacity={0.85}

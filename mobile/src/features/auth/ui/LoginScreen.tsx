@@ -199,7 +199,12 @@ export default function LoginScreen() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string | null>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const errorMessage: string | null = null;
+  const setErrorMessage = (msg: string | null) => {
+    if (msg) {
+      showToast({ message: msg, variant: 'error' });
+    }
+  };
   const [suggestEmailFallback, setSuggestEmailFallback] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [registrationSuccess, setRegistrationSuccess] = useState<{ name: string } | null>(null);
@@ -1315,24 +1320,16 @@ export default function LoginScreen() {
                       )}
                     </TouchableOpacity>
 
-                    {errorMessage ? (
-                      <View accessibilityLiveRegion="polite" style={styles.errorBanner}>
-                        <Ionicons name="alert-circle" size={16} color="#93000A" />
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.errorBannerText}>{errorMessage}</Text>
-                          {suggestEmailFallback ? (
-                            <TouchableOpacity
-                              accessibilityRole="button"
-                              onPress={() => void sendRegChallenge('Email')}
-                              style={styles.switchFallbackBtn}
-                            >
-                              <Text style={styles.switchFallbackText}>
-                                Chuyển sang gửi OTP qua Email ngay
-                              </Text>
-                            </TouchableOpacity>
-                          ) : null}
-                        </View>
-                      </View>
+                    {suggestEmailFallback ? (
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        onPress={() => void sendRegChallenge('Email')}
+                        style={[styles.switchFallbackBtn, { marginTop: 8 }]}
+                      >
+                        <Text style={styles.switchFallbackText}>
+                          Chuyển sang gửi OTP qua Email ngay
+                        </Text>
+                      </TouchableOpacity>
                     ) : null}
 
                     <View style={styles.dividerRow}>

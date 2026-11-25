@@ -22,6 +22,8 @@ import {
   subscribeBackendAuthCleared,
 } from '@/shared/api/client';
 import { isSupabaseConfigured, supabase } from '@/shared/lib/supabase';
+import { setContributionsUserId } from '@/entities/contribution/model/store';
+import { setFavoritesUserId } from './favoritesStorage';
 
 export interface UserProfile {
   id: string;
@@ -415,13 +417,18 @@ export function AuthProvider({ children }: PropsWithChildren) {
     []
   );
 
-  const refreshProfile = useCallback(async () => {
+  const refreshProfile = useCallback(async (overrideAccessToken?: string) => {
     const stored = await getStoredBackendTokens();
     let backendToken = await getStoredBackendAccessToken();
     if (!backendToken && stored?.refreshToken) {
       backendToken = await refreshBackendAccessToken();
     }
-    const hasToken = Boolean(session?.access_token || backendToken);
+    let supabaseToken = overrideAccessToken || session?.access_token;
+    if (!supabaseToken && isSupabaseConfigured) {
+      const { data } = await supabase.auth.getSession();
+      supabaseToken = data.session?.access_token;
+    }
+    const hasToken = Boolean(supabaseToken || backendToken);
     if (!hasToken) {
       setProfileStats(DEFAULT_PROFILE_STATS);
       return;
@@ -527,13 +534,21 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
         if (isSupabaseConfigured) {
           const { data } = await supabase.auth.getSession();
-          if (mounted) setSession(data.session);
+          if (mounted) {
+            setSession(data.session);
+            if (data.session?.access_token) {
+              await refreshProfile(data.session.access_token);
+            }
+          }
 
           const listener = supabase.auth.onAuthStateChange((event, nextSession) => {
             if (!mounted) return;
             setSession(nextSession);
             if (event === 'PASSWORD_RECOVERY') {
               setPasswordRecoveryPending(true);
+            }
+            if (nextSession?.access_token && event === 'SIGNED_IN') {
+              void refreshProfile(nextSession.access_token);
             }
           });
           subscription = listener.data.subscription;
@@ -578,7 +593,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
           return;
         }
       } catch (error) {
-        if (error instanceof ApiError && error.status === 404 && isSupabaseConfigured) {
+        if (
+          error instanceof ApiError &&
+          (error.status === 401 || error.status === 404 || error.status === 503) &&
+          normalizedIdentifier.includes('@') &&
+          isSupabaseConfigured
+        ) {
           allowSupabaseFallback = true;
         } else {
           throw new Error(mapAuthErrorMessage(error, 'Không thể đăng nhập tài khoản.'));
@@ -586,11 +606,16 @@ export function AuthProvider({ children }: PropsWithChildren) {
       }
 
       if (allowSupabaseFallback && isSupabaseConfigured) {
-        const { error } = await supabase.auth.signInWithPassword({
+        const { data: signInData, error } = await supabase.auth.signInWithPassword({
           email: normalizedIdentifier,
           password,
         });
         if (error) throw new Error(mapAuthErrorMessage(error, 'Không thể đăng nhập tài khoản.'));
+        const userRole = String(signInData?.user?.app_metadata?.role ?? '').toLowerCase();
+        if (userRole === 'admin' || userRole === 'moderator') {
+          await supabase.auth.signOut();
+          throw new Error('Tài khoản quản trị viên không được phép đăng nhập trên ứng dụng di động. Vui lòng sử dụng tài khoản người dùng thông thường.');
+        }
         await refreshProfile();
         return;
       }
@@ -664,11 +689,69 @@ export function AuthProvider({ children }: PropsWithChildren) {
     const redirectUri = Linking.createURL('auth/google/callback', { scheme: 'accessmapvn' });
 
     try {
-      const start = await apiClient.post<{ authorizationUrl: string; expiresAt: string }>(
-        '/api/v1/auth/google/start',
-        { redirectUri },
-        { auth: 'none' }
-      );
+      let start: { authorizationUrl: string; expiresAt: string } | null = null;
+      try {
+        start = await apiClient.post<{ authorizationUrl: string; expiresAt: string }>(
+          '/api/v1/auth/google/start',
+          { redirectUri },
+          { auth: 'none' }
+        );
+      } catch (startErr) {
+        if (
+          startErr instanceof ApiError &&
+          (startErr.status === 404 || startErr.status === 503) &&
+          isSupabaseConfigured
+        ) {
+          const { data, error: sbStartErr } = await supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: { redirectTo: redirectUri, skipBrowserRedirect: true },
+          });
+          if (sbStartErr || !data?.url) {
+            throw new Error(sbStartErr?.message || 'Không thể khởi tạo đăng nhập Google.');
+          }
+          const sbRes = await WebBrowser.openAuthSessionAsync(data.url, redirectUri);
+          if (sbRes.type !== 'success' || !sbRes.url) {
+            return { status: 'cancelled' };
+          }
+          const urlObj = new URL(sbRes.url);
+          const hashParams = new URLSearchParams(urlObj.hash.replace(/^#/, ''));
+          const accessToken = hashParams.get('access_token') || urlObj.searchParams.get('access_token');
+          const refreshToken = hashParams.get('refresh_token') || urlObj.searchParams.get('refresh_token');
+          const codeParam = urlObj.searchParams.get('code');
+
+          if (accessToken && refreshToken) {
+            const { data: sessData, error: sessErr } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+            if (sessErr) throw sessErr;
+            const role = String(sessData?.user?.app_metadata?.role ?? '').toLowerCase();
+            if (role === 'admin' || role === 'moderator') {
+              await supabase.auth.signOut();
+              throw new Error(
+                'Tài khoản quản trị viên không được phép đăng nhập trên ứng dụng di động. Vui lòng sử dụng tài khoản người dùng thông thường.'
+              );
+            }
+            await refreshProfile();
+            return { status: 'signed_in' };
+          }
+          if (codeParam) {
+            const { data: exchData, error: exchErr } = await supabase.auth.exchangeCodeForSession(codeParam);
+            if (exchErr) throw exchErr;
+            const role = String(exchData?.user?.app_metadata?.role ?? '').toLowerCase();
+            if (role === 'admin' || role === 'moderator') {
+              await supabase.auth.signOut();
+              throw new Error(
+                'Tài khoản quản trị viên không được phép đăng nhập trên ứng dụng di động. Vui lòng sử dụng tài khoản người dùng thông thường.'
+              );
+            }
+            await refreshProfile();
+            return { status: 'signed_in' };
+          }
+          throw new Error('Không nhận được thông tin phiên đăng nhập Google.');
+        }
+        throw startErr;
+      }
       if (!start?.authorizationUrl) {
         throw new Error('Máy chủ không trả về liên kết đăng nhập Google.');
       }
@@ -782,7 +865,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
       const expectedVersion = backendUser?.profileVersion ?? 1;
 
       try {
-        const updated = await apiClient.patch<{
+        let updated: {
           userId?: string;
           name?: string;
           email?: string;
@@ -790,11 +873,32 @@ export function AuthProvider({ children }: PropsWithChildren) {
           emailVerified?: boolean;
           phoneVerified?: boolean;
           profileVersion?: number;
-        }>(
-          '/api/v1/me',
-          { name: cleanName, expectedProfileVersion: expectedVersion },
-          { auth: 'required' }
-        );
+        };
+        try {
+          updated = await apiClient.patch<typeof updated>(
+            '/api/v1/me',
+            { name: cleanName, expectedProfileVersion: expectedVersion },
+            { auth: 'required' }
+          );
+        } catch (patchErr) {
+          if (patchErr instanceof ApiError && (patchErr.status === 409 || patchErr.status === 412)) {
+            const latest = await apiClient.get<{ profileVersion?: number }>('/api/v1/me', { auth: 'required' });
+            const freshVersion = typeof latest?.profileVersion === 'number' ? latest.profileVersion : expectedVersion;
+            updated = await apiClient.patch<typeof updated>(
+              '/api/v1/me',
+              { name: cleanName, expectedProfileVersion: freshVersion },
+              { auth: 'required' }
+            );
+          } else {
+            throw patchErr;
+          }
+        }
+
+        if (isSupabaseConfigured) {
+          void supabase.auth.updateUser({
+            data: { full_name: cleanName, name: cleanName },
+          }).catch(() => {});
+        }
 
         setBackendUser((prev) => ({
           id: updated?.userId || prev?.id || '',
@@ -809,6 +913,28 @@ export function AuthProvider({ children }: PropsWithChildren) {
               : expectedVersion + 1,
         }));
       } catch (error) {
+        if (error instanceof ApiError && (error.status === 404 || error.status === 503) && isSupabaseConfigured) {
+          const { error: sbError } = await supabase.auth.updateUser({
+            data: { full_name: cleanName, name: cleanName },
+          });
+          if (sbError) {
+            throw new Error(mapAuthErrorMessage(sbError, 'Không thể cập nhật họ và tên.'));
+          }
+          setBackendUser((prev) =>
+            prev
+              ? { ...prev, name: cleanName }
+              : {
+                  id: user?.id || '',
+                  name: cleanName,
+                  email: user?.email || '',
+                  phoneNumber: null,
+                  emailVerified: true,
+                  phoneVerified: false,
+                  profileVersion: 1,
+                }
+          );
+          return;
+        }
         if (error instanceof ApiError && error.status === 409) {
           await refreshProfile();
         }
@@ -872,6 +998,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
 
   const activeIdentity = user ?? backendUser;
   const isGuest = !activeIdentity;
+
+  useEffect(() => {
+    const uid = activeIdentity?.id ?? null;
+    setFavoritesUserId(uid);
+    setContributionsUserId(uid);
+  }, [activeIdentity?.id]);
 
   const userProfile = useMemo<UserProfile>(() => {
     if (!activeIdentity) {

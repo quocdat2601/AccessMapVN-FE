@@ -101,29 +101,42 @@ export function DiscoveryScreen({
   useEffect(() => {
     let active = true;
     async function loadSavedPreferencesAndFavorites() {
+      if (!user) {
+        if (active) {
+          setAccessibilityFilters(DEFAULT_ACCESSIBILITY_FILTERS);
+          setFavoriteIds([]);
+        }
+        return;
+      }
+
+      const prefKey = `@accessmap_saved_preferences_v2_${user.id}`;
+      let hasLocalPrefs = false;
       try {
-        const localRaw = await AsyncStorage.getItem('@accessmap_saved_preferences');
+        const localRaw = await AsyncStorage.getItem(prefKey);
         if (localRaw && active) {
           const parsed = JSON.parse(localRaw) as Partial<AccessibilityFilterState>;
           setAccessibilityFilters(normalizeAccessibilityFilters(parsed));
+          hasLocalPrefs = true;
         }
       } catch { }
 
+      if (!hasLocalPrefs && active) {
+        setAccessibilityFilters(DEFAULT_ACCESSIBILITY_FILTERS);
+      }
+
       try {
-        const favList = await loadSavedFavorites(Boolean(user));
+        const favList = await loadSavedFavorites(true);
         if (active) {
           setFavoriteIds(favList.map((f) => f.id));
         }
       } catch { }
-
-      if (!user) return;
 
       try {
         const serverPrefs = await fetchUserAccessibilityPreferences();
         if (active && serverPrefs && Object.keys(serverPrefs).length > 0) {
           const merged = normalizeAccessibilityFilters(serverPrefs as Partial<AccessibilityFilterState>);
           setAccessibilityFilters(merged);
-          void AsyncStorage.setItem('@accessmap_saved_preferences', JSON.stringify(merged));
+          void AsyncStorage.setItem(prefKey, JSON.stringify(merged));
         }
       } catch { }
     }
@@ -142,8 +155,12 @@ export function DiscoveryScreen({
 
   const handleToggleFavorite = useCallback(
     async (place: PlaceDto) => {
+      if (!user) {
+        Alert.alert('Yêu cầu đăng nhập', 'Vui lòng đăng nhập để lưu địa điểm yêu thích.');
+        return;
+      }
       try {
-        const { items } = await toggleSavedFavorite(place, Boolean(user));
+        const { items } = await toggleSavedFavorite(place, true);
         setFavoriteIds(items.map((item) => item.id));
       } catch {
         Alert.alert('Lỗi', 'Không thể cập nhật địa điểm yêu thích lúc này.');
@@ -154,14 +171,17 @@ export function DiscoveryScreen({
 
   const handleSaveDefaultPreferences = useCallback(
     async (filters: AccessibilityFilterState) => {
+      if (!user) {
+        Alert.alert('Yêu cầu đăng nhập', 'Vui lòng đăng nhập để lưu hồ sơ tiếp cận cá nhân.');
+        return;
+      }
       setIsSavingPrefs(true);
       try {
         const normalized = normalizeAccessibilityFilters(filters);
-        await AsyncStorage.setItem('@accessmap_saved_preferences', JSON.stringify(normalized));
+        const prefKey = `@accessmap_saved_preferences_v2_${user.id}`;
+        await AsyncStorage.setItem(prefKey, JSON.stringify(normalized));
         setAccessibilityFilters(normalized);
-        if (user) {
-          await saveUserAccessibilityPreferences(normalized as unknown as Record<string, unknown>);
-        }
+        await saveUserAccessibilityPreferences(normalized as unknown as Record<string, unknown>);
         Alert.alert(
           'Đã lưu hồ sơ tiếp cận',
           'Bộ tiêu chí của bạn đã được lưu làm mặc định cho các lần tìm kiếm tiếp theo.'

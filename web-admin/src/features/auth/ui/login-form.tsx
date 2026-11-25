@@ -94,7 +94,7 @@ export function LoginForm({
               });
               portalSignedIn = true;
             }
-          } else if (portalRes.status === 404) {
+          } else if (portalRes.status === 404 || portalRes.status === 503) {
             allowSupabaseFallback = true;
           } else {
             const problem = (await portalRes.json().catch(() => undefined)) as

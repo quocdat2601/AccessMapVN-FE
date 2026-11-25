@@ -458,7 +458,7 @@ export function CommunityCommentsView({
             </Text>
           </View>
         ) : (
-          filteredReviews.map((rev) => {
+          filteredReviews.map((rev, idx) => {
             const revReaction = reactions[rev.id] ?? {};
             const upvoted = Boolean(revReaction.upvoted);
             const liked = Boolean(revReaction.liked);
@@ -469,7 +469,7 @@ export function CommunityCommentsView({
 
             return (
               <View
-                key={rev.id}
+                key={`${rev.id || 'rev'}-${idx}`}
                 style={[styles.commentCard, isPending && styles.commentCardPending]}
               >
                 <View style={styles.cardHeader}>

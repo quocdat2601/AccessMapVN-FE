@@ -2,11 +2,24 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiClient } from '@/shared/api/client';
 import type { CapturedContributionMedia, ContributionSubmissionRecord } from './types';
 
-const STORAGE_KEY = '@accessmap_pending_submissions';
+const STORAGE_KEY_PREFIX = '@accessmap_pending_submissions_v2_';
 
+let activeUserId: string | null = null;
 let pendingMedia: CapturedContributionMedia | null = null;
 let submissionHistory: ContributionSubmissionRecord[] = [];
 let hasLoadedFromStorage = false;
+
+function getStorageKey(): string | null {
+  return activeUserId ? `${STORAGE_KEY_PREFIX}${activeUserId}` : null;
+}
+
+export function setContributionsUserId(userId: string | null): void {
+  const next = userId?.trim() || null;
+  if (activeUserId === next) return;
+  activeUserId = next;
+  submissionHistory = [];
+  hasLoadedFromStorage = false;
+}
 
 export function setPendingContributionMedia(media: CapturedContributionMedia | null) {
   pendingMedia = media;
@@ -21,9 +34,15 @@ export function clearPendingContributionMedia() {
 }
 
 export async function loadContributionRecords(forceSync = false): Promise<ContributionSubmissionRecord[]> {
+  const storageKey = getStorageKey();
+  if (!storageKey) {
+    submissionHistory = [];
+    hasLoadedFromStorage = true;
+    return [];
+  }
   if (hasLoadedFromStorage && !forceSync) return [...submissionHistory];
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    const raw = await AsyncStorage.getItem(storageKey);
     if (raw) {
       const parsed: ContributionSubmissionRecord[] = JSON.parse(raw);
       // Prune records older than 24 hours to prevent stale local cache from haunting venues
@@ -32,8 +51,10 @@ export async function loadContributionRecords(forceSync = false): Promise<Contri
         ? parsed.filter((r) => typeof r.createdAt === 'number' && r.createdAt > cutoff)
         : [];
       if (submissionHistory.length !== parsed.length) {
-        void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(submissionHistory)).catch(() => {});
+        void AsyncStorage.setItem(storageKey, JSON.stringify(submissionHistory)).catch(() => {});
       }
+    } else {
+      submissionHistory = [];
     }
   } catch {
     // Fallback gracefully to in-memory store
@@ -140,7 +161,10 @@ export function updateContributionRecordStatus(
   if (!changed) return;
 
   submissionHistory[idx] = next;
-  void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(submissionHistory)).catch(() => {});
+  const storageKey = getStorageKey();
+  if (storageKey) {
+    void AsyncStorage.setItem(storageKey, JSON.stringify(submissionHistory)).catch(() => {});
+  }
 }
 
 export async function syncPendingSubmissionsWithBackend(): Promise<ContributionSubmissionRecord[]> {
@@ -185,7 +209,10 @@ export async function syncPendingSubmissionsWithBackend(): Promise<ContributionS
     }
 
     if (changed) {
-      void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(submissionHistory)).catch(() => {});
+      const storageKey = getStorageKey();
+      if (storageKey) {
+        void AsyncStorage.setItem(storageKey, JSON.stringify(submissionHistory)).catch(() => {});
+      }
     }
   } catch {
     // Fail safe to in-memory/cache on network drop
@@ -197,12 +224,18 @@ export async function syncPendingSubmissionsWithBackend(): Promise<ContributionS
 export async function clearContributionRecords(): Promise<void> {
   submissionHistory = [];
   hasLoadedFromStorage = true;
-  await AsyncStorage.removeItem(STORAGE_KEY);
+  const storageKey = getStorageKey();
+  if (storageKey) {
+    await AsyncStorage.removeItem(storageKey);
+  }
 }
 
 export function addContributionRecord(record: ContributionSubmissionRecord) {
   submissionHistory.unshift(record);
-  void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(submissionHistory)).catch(() => {});
+  const storageKey = getStorageKey();
+  if (storageKey) {
+    void AsyncStorage.setItem(storageKey, JSON.stringify(submissionHistory)).catch(() => {});
+  }
 }
 
 export function getContributionRecords(): ContributionSubmissionRecord[] {

@@ -214,11 +214,7 @@ export function ContributionHistorySheet({ visible, onClose }: ContributionHisto
 
     const finalItems = local.length > 0 ? local : getContributionRecords();
     setFailedThumbs({});
-    if (finalItems.length > 0) {
-      setItems(finalItems);
-    } else {
-      setItems(FALLBACK_DEMO_ITEMS);
-    }
+    setItems(finalItems);
   };
 
   useEffect(() => {

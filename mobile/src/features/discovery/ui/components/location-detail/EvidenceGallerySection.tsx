@@ -168,7 +168,7 @@ export function EvidenceGallerySection({
 
     return (
       <Pressable
-        key={item.id}
+        key={`${item.id || 'ev'}-${index}`}
         style={({ pressed }) => [
           styles.featuredCard,
           { width: cardWidth },

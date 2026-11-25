@@ -30,6 +30,7 @@ import {
 } from '@/features/discovery/ui/components/AccessibilityFilterModal';
 import { BottomNavBar } from '@/shared/ui/BottomNavBar';
 import {
+  fetchUserAccessibilityPreferences,
   saveUserAccessibilityPreferences,
   useAuth,
   validateNameRule,
@@ -57,9 +58,14 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
 
   const { triggerHaptic } = useAccessibility();
   const { showToast } = useToast();
-  const { isGuest, refreshProfile, sendPasswordReset, signOut, updateProfileName, user, userProfile } = useAuth();
+  const { completePasswordRecovery, isGuest, refreshProfile, sendPasswordReset, signOut, updateProfileName, user, userProfile } = useAuth();
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
+  const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showFavorites, setShowFavorites] = useState(false);
   const [showContributionHistory, setShowContributionHistory] = useState(false);
@@ -79,15 +85,41 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
   useEffect(() => {
     let active = true;
     async function loadProfileData() {
+      if (isGuest || !userProfile.id || userProfile.id === 'guest') {
+        if (active) {
+          setSavedFilters(DEFAULT_ACCESSIBILITY_FILTERS);
+          setFavoritesCount(0);
+        }
+        return;
+      }
+
+      const prefKey = `@accessmap_saved_preferences_v2_${userProfile.id}`;
+      let hasLocal = false;
       try {
-        const rawPrefs = await AsyncStorage.getItem('@accessmap_saved_preferences');
+        const rawPrefs = await AsyncStorage.getItem(prefKey);
         if (rawPrefs && active) {
           setSavedFilters(normalizeAccessibilityFilters(JSON.parse(rawPrefs)));
+          hasLocal = true;
+        }
+      } catch {}
+
+      if (!hasLocal && active) {
+        setSavedFilters(DEFAULT_ACCESSIBILITY_FILTERS);
+      }
+
+      try {
+        const serverPrefs = await fetchUserAccessibilityPreferences();
+        if (active && serverPrefs && Object.keys(serverPrefs).length > 0) {
+          const normalized = normalizeAccessibilityFilters(
+            serverPrefs as Partial<AccessibilityFilterState>
+          );
+          setSavedFilters(normalized);
+          void AsyncStorage.setItem(prefKey, JSON.stringify(normalized));
         }
       } catch {}
 
       try {
-        const favs = await loadSavedFavorites(!isGuest);
+        const favs = await loadSavedFavorites(true);
         if (active) {
           setFavoritesCount(favs.length);
         }
@@ -98,7 +130,7 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
     return () => {
       active = false;
     };
-  }, [isGuest]);
+  }, [isGuest, userProfile.id]);
 
   useEffect(() => {
     if (!isGuest) {
@@ -114,24 +146,27 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
 
   const handleSaveAccessibilityProfile = useCallback(
     async (filters: AccessibilityFilterState) => {
+      if (isGuest || !user) {
+        router.push('/login' as any);
+        return;
+      }
       setIsSavingPrefs(true);
       try {
         const normalized = normalizeAccessibilityFilters(filters);
-        await AsyncStorage.setItem('@accessmap_saved_preferences', JSON.stringify(normalized));
+        const prefKey = `@accessmap_saved_preferences_v2_${userProfile.id}`;
+        await AsyncStorage.setItem(prefKey, JSON.stringify(normalized));
         setSavedFilters(normalized);
-        if (user) {
-          await saveUserAccessibilityPreferences(normalized as unknown as Record<string, unknown>);
-        }
+        await saveUserAccessibilityPreferences(normalized as unknown as Record<string, unknown>);
       } finally {
         setIsSavingPrefs(false);
       }
     },
-    [user]
+    [isGuest, router, user, userProfile.id]
   );
 
   const selectedCriteria = useMemo(() => getSelectedCriteriaList(savedFilters), [savedFilters]);
   const visibleChipLabels = useMemo(() => {
-    if (selectedCriteria.length === 0) return DEFAULT_CHIP_LABELS;
+    if (selectedCriteria.length === 0) return [];
     return selectedCriteria.slice(0, 3).map((c) => c.label);
   }, [selectedCriteria]);
   const extraCriteriaCount = useMemo(() => {
@@ -201,6 +236,38 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
     ]);
   };
 
+  const openChangePasswordModal = () => {
+    setNewPasswordInput('');
+    setConfirmPasswordInput('');
+    setChangePasswordError(null);
+    setShowChangePasswordModal(true);
+  };
+
+  const handleSaveNewPassword = async () => {
+    if (!newPasswordInput || newPasswordInput.length < 6) {
+      setChangePasswordError('Mật khẩu mới phải có ít nhất 6 ký tự.');
+      return;
+    }
+    if (newPasswordInput !== confirmPasswordInput) {
+      setChangePasswordError('Mật khẩu xác nhận không khớp.');
+      return;
+    }
+    setIsSavingPassword(true);
+    setChangePasswordError(null);
+    try {
+      await completePasswordRecovery(newPasswordInput);
+      setShowChangePasswordModal(false);
+      triggerHaptic(30);
+      showToast({ message: 'Đã đổi mật khẩu thành công.', variant: 'success' });
+    } catch (error) {
+      setChangePasswordError(
+        error instanceof Error ? error.message : 'Không thể đổi mật khẩu.'
+      );
+    } finally {
+      setIsSavingPassword(false);
+    }
+  };
+
   const handleAccountSettings = () => {
     if (isGuest) {
       router.push('/login' as any);
@@ -215,23 +282,12 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
           onPress: openEditProfile,
         },
         {
-          text: 'Cài đặt trợ năng',
-          onPress: () => setShowAccessibilitySettings(true),
+          text: 'Đổi mật khẩu',
+          onPress: openChangePasswordModal,
         },
         {
-          text: 'Gửi email đổi mật khẩu',
-          onPress: async () => {
-            if (!userProfile.email) return;
-            setIsResettingPassword(true);
-            try {
-              await sendPasswordReset(userProfile.email);
-              Alert.alert('Đã gửi liên kết', `Đã gửi hướng dẫn tới ${userProfile.email}.`);
-            } catch (error) {
-              Alert.alert('Lỗi', error instanceof Error ? error.message : 'Không thể gửi email.');
-            } finally {
-              setIsResettingPassword(false);
-            }
-          },
+          text: 'Cài đặt trợ năng',
+          onPress: () => setShowAccessibilitySettings(true),
         },
         { text: 'Đóng', style: 'cancel' },
       ]
@@ -332,15 +388,17 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
               </View>
             </View>
 
-            <TouchableOpacity
-              style={styles.editCircleBtn}
-              onPress={openEditProfile}
-              accessibilityRole="button"
-              accessibilityLabel="Chỉnh sửa hồ sơ"
-              activeOpacity={0.78}
-            >
-              <MaterialCommunityIcons name="pencil-outline" size={18} color="#004F58" />
-            </TouchableOpacity>
+            {!isGuest && (
+              <TouchableOpacity
+                style={styles.editCircleBtn}
+                onPress={openEditProfile}
+                accessibilityRole="button"
+                accessibilityLabel="Chỉnh sửa hồ sơ"
+                activeOpacity={0.78}
+              >
+                <MaterialCommunityIcons name="pencil-outline" size={18} color="#004F58" />
+              </TouchableOpacity>
+            )}
           </View>
 
           {isGuest && (
@@ -351,220 +409,230 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
             >
               <Ionicons name="log-in-outline" size={17} color="#004F58" />
               <Text style={styles.guestLoginBannerText}>
-                Đăng nhập để đồng bộ hồ sơ tiếp cận & tích lũy uy tín, danh vọng
+                Đăng nhập để đồng bộ hồ sơ tiếp cận, địa điểm yêu thích, đóng góp & tích lũy uy tín
               </Text>
               <Ionicons name="chevron-forward" size={16} color="#004F58" />
             </TouchableOpacity>
           )}
         </View>
 
-        {/* 2. Hồ sơ tiếp cận Card */}
-        <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
-            <View style={styles.cardHeaderLeft}>
-              <View style={styles.mintCircleIcon}>
-                <MaterialCommunityIcons name="wheelchair-accessibility" size={19} color="#004F58" />
-              </View>
-              <Text style={styles.cardTitle}>Hồ sơ tiếp cận</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.cardLinkBtn}
-              onPress={() => setShowProfileFilterModal(true)}
-              activeOpacity={0.75}
-            >
-              <Text style={styles.cardLinkText}>Quản lý hồ sơ</Text>
-              <Ionicons name="chevron-forward" size={14} color="#006874" />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.profileStatusRow}>
-            <Text style={styles.profileStatusDesc}>
-              Đang lưu tiêu chí ưu tiên di chuyển cá nhân
-            </Text>
-            <View style={styles.establishedPill}>
-              <Text style={styles.establishedPillText}>Đã thiết lập</Text>
-            </View>
-          </View>
-
-          <View style={styles.criteriaChipsWrap}>
-            {visibleChipLabels.map((label) => (
-              <View key={label} style={styles.criterionChip}>
-                <Ionicons name="checkmark-circle-outline" size={14} color="#006874" />
-                <Text style={styles.criterionChipText}>{label}</Text>
-              </View>
-            ))}
-          </View>
-
-          <View style={styles.sparkleNoteRow}>
-            <Ionicons name="sparkles-outline" size={15} color="#006874" />
-            <Text style={styles.sparkleNoteText}>
-              {extraCriteriaCount > 0
-                ? `+${extraCriteriaCount} tiêu chí khác được lưu làm mặc định khi tìm kiếm hành trình.`
-                : 'Các tiêu chí trên được áp dụng mặc định khi tìm kiếm hành trình.'}
-            </Text>
-          </View>
-        </View>
-
-        {/* 3. Địa điểm yêu thích Card */}
-        <TouchableOpacity
-          style={[styles.card, styles.favoriteCardRow]}
-          onPress={() => setShowFavorites(true)}
-          activeOpacity={0.82}
-        >
-          <View style={styles.mintSquareIcon}>
-            <Ionicons name="bookmark" size={18} color="#004F58" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.cardTitle}>Địa điểm yêu thích</Text>
-            <Text style={styles.favoriteSubText} numberOfLines={2}>
-              Các địa điểm bạn đã lưu để tra cứu nhanh
-            </Text>
-          </View>
-          <View style={styles.countBadgePill}>
-            <Text style={styles.countBadgeText}>{favoritesCount} địa điểm</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={16} color="#64748B" />
-        </TouchableOpacity>
-
-        {/* Đóng góp của tôi Card */}
-        <Pressable
-          style={({ pressed }) => [
-            styles.card,
-            styles.favoriteCardRow,
-            pressed && styles.pressedCard,
-          ]}
-          onPress={() => setShowContributionHistory(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Đóng góp của tôi"
-        >
-          <View style={styles.mintSquareIcon}>
-            <MaterialCommunityIcons name="clipboard-text-clock-outline" size={19} color="#004F58" />
-          </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.cardTitle}>Đóng góp của tôi</Text>
-            <Text style={styles.favoriteSubText} numberOfLines={2}>
-              Xem trạng thái kiểm duyệt &amp; bổ sung minh chứng
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={16} color="#64748B" />
-        </Pressable>
-
-        {/* 3. Uy tín & Danh vọng đóng góp Card */}
-        <View style={styles.card}>
-          <View style={styles.cardHeaderRow}>
-            <View style={styles.cardHeaderLeft}>
-              <View style={styles.mintCircleIcon}>
-                <MaterialCommunityIcons name="medal-outline" size={19} color="#004F58" />
-              </View>
-              <Text style={styles.cardTitle}>Uy tín & Danh vọng đóng góp</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.cardLinkBtn}
-              onPress={() => setShowLeaderboard(true)}
-              activeOpacity={0.75}
-            >
-              <Text style={styles.cardLinkText}>Xem chi tiết</Text>
-              <Ionicons name="chevron-forward" size={14} color="#006874" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Sub-box 1: Danh vọng xếp hạng */}
-          <View style={styles.rewardInnerBox}>
-            <View style={styles.rewardBoxTopRow}>
-              <Text style={styles.rewardBoxLabelTeal}>Danh vọng xếp hạng</Text>
-              <MaterialCommunityIcons name="star-circle-outline" size={18} color="#006874" />
-            </View>
-            <View style={styles.pointsHeroRow}>
-              <Text style={styles.pointsBigNumber}>{displayExpPoints}</Text>
-              <Text style={styles.pointsUnit}>điểm</Text>
-            </View>
-            <View style={styles.rewardBoxFootRow}>
-              <MaterialCommunityIcons name="star-outline" size={14} color="#006874" />
-              <Text style={styles.rewardBoxFootText}>
-                Địa điểm mới +5 · Bổ sung +2 · Báo cáo hợp lệ +1.
-              </Text>
-            </View>
-          </View>
-
-          {/* Sub-box 2: Thứ hạng cộng đồng */}
-          <View style={styles.rewardInnerBox}>
-            <View style={styles.rewardBoxTopRow}>
-              <Text style={styles.rewardBoxLabelGray}>Thứ hạng cộng đồng</Text>
-              <MaterialCommunityIcons name="seal-variant" size={18} color="#475569" />
-            </View>
-            <View style={styles.tierNameRow}>
-              <View style={styles.tierGreenDot} />
-              <Text style={styles.tierNameText}>{displayTier}</Text>
-            </View>
-            <View style={styles.rewardBoxFootRow}>
-              <MaterialCommunityIcons name="check-decagram-outline" size={14} color="#006874" />
-              <Text style={styles.rewardBoxFootText}>
-                {displayContributions > 0
-                  ? `Dựa trên ${userProfile.correctClaimCount}/${displayContributions} nhận định đã kiểm chứng.`
-                  : 'Dựa trên điểm danh vọng từ đóng góp đã công bố.'}
-              </Text>
-            </View>
-          </View>
-
-          {/* Sub-box 3: 3 chỉ số độc lập WF-04 */}
-          <View style={[styles.rewardInnerBox, { gap: 8 }]}>
-            <Text style={styles.rewardBoxLabelGray}>3 chỉ số WF-04 độc lập</Text>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 10, padding: 8 }}>
-                <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Uy tín tài khoản</Text>
-                <Text style={{ fontSize: 15, fontWeight: '800', color: '#004F58', marginTop: 2 }}>
-                  {userProfile.accountStandingScore}/100
-                </Text>
-                <Text style={{ fontSize: 10, color: '#475569' }}>{participationStatusLabel}</Text>
-              </View>
-              <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 10, padding: 8 }}>
-                <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Độ tin cậy</Text>
-                <Text
-                  style={{
-                    fontSize: userProfile.contributionAccuracyRate != null ? 15 : 12.5,
-                    fontWeight: '800',
-                    color: '#0F172A',
-                    marginTop: 2,
-                  }}
+        {!isGuest && (
+          <>
+            {/* 2. Hồ sơ tiếp cận Card */}
+            <View style={styles.card}>
+              <View style={styles.cardHeaderRow}>
+                <View style={styles.cardHeaderLeft}>
+                  <View style={styles.mintCircleIcon}>
+                    <MaterialCommunityIcons name="wheelchair-accessibility" size={19} color="#004F58" />
+                  </View>
+                  <Text style={styles.cardTitle}>Hồ sơ tiếp cận</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.cardLinkBtn}
+                  onPress={() => setShowProfileFilterModal(true)}
+                  activeOpacity={0.75}
                 >
-                  {userProfile.contributionAccuracyRate != null
-                    ? `${(userProfile.contributionAccuracyRate <= 1
-                        ? userProfile.contributionAccuracyRate * 100
-                        : userProfile.contributionAccuracyRate
-                      ).toFixed(0)}%`
-                    : 'Chưa đủ dữ liệu'}
-                </Text>
-                <Text style={{ fontSize: 10, color: '#475569' }}>
-                  {userProfile.correctClaimCount} đúng / {userProfile.incorrectClaimCount} sai
-                </Text>
+                  <Text style={styles.cardLinkText}>Quản lý hồ sơ</Text>
+                  <Ionicons name="chevron-forward" size={14} color="#006874" />
+                </TouchableOpacity>
               </View>
-              <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 10, padding: 8 }}>
-                <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Danh vọng</Text>
-                <Text style={{ fontSize: 15, fontWeight: '800', color: '#B45309', marginTop: 2 }}>
-                  {displayExpPoints} điểm
+
+              <View style={styles.profileStatusRow}>
+                <Text style={styles.profileStatusDesc}>
+                  {visibleChipLabels.length > 0
+                    ? 'Đang lưu tiêu chí ưu tiên di chuyển cá nhân'
+                    : 'Chưa chọn tiêu chí ưu tiên di chuyển cá nhân'}
                 </Text>
-                <Text style={{ fontSize: 10, color: '#475569' }} numberOfLines={2}>
-                  {displayTier}
+                <View style={styles.establishedPill}>
+                  <Text style={styles.establishedPillText}>
+                    {visibleChipLabels.length > 0 ? 'Đã thiết lập' : 'Chưa thiết lập'}
+                  </Text>
+                </View>
+              </View>
+
+              {visibleChipLabels.length > 0 && (
+                <View style={styles.criteriaChipsWrap}>
+                  {visibleChipLabels.map((label) => (
+                    <View key={label} style={styles.criterionChip}>
+                      <Ionicons name="checkmark-circle-outline" size={14} color="#006874" />
+                      <Text style={styles.criterionChipText}>{label}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              <View style={styles.sparkleNoteRow}>
+                <Ionicons name="sparkles-outline" size={15} color="#006874" />
+                <Text style={styles.sparkleNoteText}>
+                  {visibleChipLabels.length === 0
+                    ? 'Bấm "Quản lý hồ sơ" để thiết lập bộ lọc mặc định theo nhu cầu của bạn.'
+                    : extraCriteriaCount > 0
+                    ? `+${extraCriteriaCount} tiêu chí khác được lưu làm mặc định khi tìm kiếm hành trình.`
+                    : 'Các tiêu chí trên được áp dụng mặc định khi tìm kiếm hành trình.'}
                 </Text>
               </View>
             </View>
-          </View>
 
-          {/* Mint progress banner */}
-          <TouchableOpacity
-            style={styles.levelUpBanner}
-            onPress={() => setShowLeaderboard(true)}
-            activeOpacity={0.82}
-          >
-            <Ionicons name="flag-outline" size={15} color="#004F58" />
-            <Text style={styles.levelUpBannerText}>
-              {isGuest
-                ? 'Đăng nhập để tích lũy điểm uy tín! '
-                : 'Xem thứ hạng & quy tắc cộng điểm uy tín. '}
-              <Text style={styles.levelUpBannerLink}>Xem chi tiết</Text>
-            </Text>
-          </TouchableOpacity>
-        </View>
+            {/* 3. Địa điểm yêu thích Card */}
+            <TouchableOpacity
+              style={[styles.card, styles.favoriteCardRow]}
+              onPress={() => setShowFavorites(true)}
+              activeOpacity={0.82}
+            >
+              <View style={styles.mintSquareIcon}>
+                <Ionicons name="bookmark" size={18} color="#004F58" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>Địa điểm yêu thích</Text>
+                <Text style={styles.favoriteSubText} numberOfLines={2}>
+                  Các địa điểm bạn đã lưu để tra cứu nhanh
+                </Text>
+              </View>
+              <View style={styles.countBadgePill}>
+                <Text style={styles.countBadgeText}>{favoritesCount} địa điểm</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color="#64748B" />
+            </TouchableOpacity>
+
+            {/* Đóng góp của tôi Card */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.card,
+                styles.favoriteCardRow,
+                pressed && styles.pressedCard,
+              ]}
+              onPress={() => setShowContributionHistory(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Đóng góp của tôi"
+            >
+              <View style={styles.mintSquareIcon}>
+                <MaterialCommunityIcons name="clipboard-text-clock-outline" size={19} color="#004F58" />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.cardTitle}>Đóng góp của tôi</Text>
+                <Text style={styles.favoriteSubText} numberOfLines={2}>
+                  Xem trạng thái kiểm duyệt &amp; bổ sung minh chứng
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color="#64748B" />
+            </Pressable>
+
+            {/* 4. Uy tín & Danh vọng đóng góp Card */}
+            <View style={styles.card}>
+              <View style={styles.cardHeaderRow}>
+                <View style={styles.cardHeaderLeft}>
+                  <View style={styles.mintCircleIcon}>
+                    <MaterialCommunityIcons name="medal-outline" size={19} color="#004F58" />
+                  </View>
+                  <Text style={styles.cardTitle}>Uy tín & Danh vọng đóng góp</Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.cardLinkBtn}
+                  onPress={() => setShowLeaderboard(true)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.cardLinkText}>Xem chi tiết</Text>
+                  <Ionicons name="chevron-forward" size={14} color="#006874" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Sub-box 1: Danh vọng xếp hạng */}
+              <View style={styles.rewardInnerBox}>
+                <View style={styles.rewardBoxTopRow}>
+                  <Text style={styles.rewardBoxLabelTeal}>Danh vọng xếp hạng</Text>
+                  <MaterialCommunityIcons name="star-circle-outline" size={18} color="#006874" />
+                </View>
+                <View style={styles.pointsHeroRow}>
+                  <Text style={styles.pointsBigNumber}>{displayExpPoints}</Text>
+                  <Text style={styles.pointsUnit}>điểm</Text>
+                </View>
+                <View style={styles.rewardBoxFootRow}>
+                  <MaterialCommunityIcons name="star-outline" size={14} color="#006874" />
+                  <Text style={styles.rewardBoxFootText}>
+                    Địa điểm mới +5 · Bổ sung +2 · Báo cáo hợp lệ +1.
+                  </Text>
+                </View>
+              </View>
+
+              {/* Sub-box 2: Thứ hạng cộng đồng */}
+              <View style={styles.rewardInnerBox}>
+                <View style={styles.rewardBoxTopRow}>
+                  <Text style={styles.rewardBoxLabelGray}>Thứ hạng cộng đồng</Text>
+                  <MaterialCommunityIcons name="seal-variant" size={18} color="#475569" />
+                </View>
+                <View style={styles.tierNameRow}>
+                  <View style={styles.tierGreenDot} />
+                  <Text style={styles.tierNameText}>{displayTier}</Text>
+                </View>
+                <View style={styles.rewardBoxFootRow}>
+                  <MaterialCommunityIcons name="check-decagram-outline" size={14} color="#006874" />
+                  <Text style={styles.rewardBoxFootText}>
+                    {displayContributions > 0
+                      ? `Dựa trên ${userProfile.correctClaimCount}/${displayContributions} nhận định đã kiểm chứng.`
+                      : 'Dựa trên điểm danh vọng từ đóng góp đã công bố.'}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Sub-box 3: 3 chỉ số độc lập WF-04 */}
+              <View style={[styles.rewardInnerBox, { gap: 8 }]}>
+                <Text style={styles.rewardBoxLabelGray}>3 chỉ số WF-04 độc lập</Text>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 10, padding: 8 }}>
+                    <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Uy tín tài khoản</Text>
+                    <Text style={{ fontSize: 15, fontWeight: '800', color: '#004F58', marginTop: 2 }}>
+                      {userProfile.accountStandingScore}/100
+                    </Text>
+                    <Text style={{ fontSize: 10, color: '#475569' }}>{participationStatusLabel}</Text>
+                  </View>
+                  <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 10, padding: 8 }}>
+                    <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Độ tin cậy</Text>
+                    <Text
+                      style={{
+                        fontSize: userProfile.contributionAccuracyRate != null ? 15 : 12.5,
+                        fontWeight: '800',
+                        color: '#0F172A',
+                        marginTop: 2,
+                      }}
+                    >
+                      {userProfile.contributionAccuracyRate != null
+                        ? `${(userProfile.contributionAccuracyRate <= 1
+                            ? userProfile.contributionAccuracyRate * 100
+                            : userProfile.contributionAccuracyRate
+                          ).toFixed(0)}%`
+                        : 'Chưa đủ dữ liệu'}
+                    </Text>
+                    <Text style={{ fontSize: 10, color: '#475569' }}>
+                      {userProfile.correctClaimCount} đúng / {userProfile.incorrectClaimCount} sai
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1, backgroundColor: '#F8FAFC', borderRadius: 10, padding: 8 }}>
+                    <Text style={{ fontSize: 10.5, color: '#64748B', fontWeight: '600' }}>Danh vọng</Text>
+                    <Text style={{ fontSize: 15, fontWeight: '800', color: '#B45309', marginTop: 2 }}>
+                      {displayExpPoints} điểm
+                    </Text>
+                    <Text style={{ fontSize: 10, color: '#475569' }} numberOfLines={2}>
+                      {displayTier}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Mint progress banner */}
+              <TouchableOpacity
+                style={styles.levelUpBanner}
+                onPress={() => setShowLeaderboard(true)}
+                activeOpacity={0.82}
+              >
+                <Ionicons name="flag-outline" size={15} color="#004F58" />
+                <Text style={styles.levelUpBannerText}>
+                  Xem thứ hạng &amp; quy tắc cộng điểm uy tín.{' '}
+                  <Text style={styles.levelUpBannerLink}>Xem chi tiết</Text>
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
 
         {/* 5. Menu List Card */}
         <View style={styles.menuCard}>
@@ -591,17 +659,19 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
             <Ionicons name="chevron-forward" size={17} color="#64748B" />
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.menuRow}
-            onPress={handleAccountSettings}
-            activeOpacity={0.75}
-          >
-            <View style={styles.menuIconCircle}>
-              <MaterialCommunityIcons name="account-cog-outline" size={19} color="#334155" />
-            </View>
-            <Text style={styles.menuRowLabel}>Cài đặt tài khoản</Text>
-            <Ionicons name="chevron-forward" size={17} color="#64748B" />
-          </TouchableOpacity>
+          {!isGuest && (
+            <TouchableOpacity
+              style={styles.menuRow}
+              onPress={handleAccountSettings}
+              activeOpacity={0.75}
+            >
+              <View style={styles.menuIconCircle}>
+                <MaterialCommunityIcons name="account-cog-outline" size={19} color="#334155" />
+              </View>
+              <Text style={styles.menuRowLabel}>Cài đặt tài khoản</Text>
+              <Ionicons name="chevron-forward" size={17} color="#64748B" />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={styles.menuRow}
@@ -620,17 +690,19 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
             <Ionicons name="chevron-forward" size={17} color="#64748B" />
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.menuRow}
-            onPress={() => router.push('/reports' as any)}
-            activeOpacity={0.75}
-          >
-            <View style={styles.menuIconCircle}>
-              <MaterialCommunityIcons name="headset" size={19} color="#334155" />
-            </View>
-            <Text style={styles.menuRowLabel}>Trợ giúp & Phản hồi khẩn cấp</Text>
-            <Ionicons name="chevron-forward" size={17} color="#64748B" />
-          </TouchableOpacity>
+          {!isGuest && (
+            <TouchableOpacity
+              style={styles.menuRow}
+              onPress={() => router.push('/reports' as any)}
+              activeOpacity={0.75}
+            >
+              <View style={styles.menuIconCircle}>
+                <MaterialCommunityIcons name="headset" size={19} color="#334155" />
+              </View>
+              <Text style={styles.menuRowLabel}>Trợ giúp & Phản hồi khẩn cấp</Text>
+              <Ionicons name="chevron-forward" size={17} color="#64748B" />
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={styles.menuRow}
@@ -789,6 +861,87 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
                 <ActivityIndicator color="#FFFFFF" size="small" />
               ) : (
                 <Text style={styles.editSaveBtnText}>Lưu thay đổi</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={showChangePasswordModal}
+        onRequestClose={() => {
+          if (!isSavingPassword) setShowChangePasswordModal(false);
+        }}
+      >
+        <KeyboardAvoidingView behavior="padding" style={styles.editModalBackdrop}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => {
+              if (!isSavingPassword) setShowChangePasswordModal(false);
+            }}
+          />
+          <View style={styles.editModalCard}>
+            <View style={styles.editModalHeader}>
+              <Text style={styles.editModalTitle}>Đổi mật khẩu</Text>
+              <TouchableOpacity
+                accessibilityLabel="Đóng"
+                accessibilityRole="button"
+                disabled={isSavingPassword}
+                onPress={() => setShowChangePasswordModal(false)}
+                style={styles.editModalClose}
+              >
+                <Ionicons name="close" size={20} color="#475569" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.editFieldLabel}>Mật khẩu mới *</Text>
+            <TextInput
+              accessibilityLabel="Mật khẩu mới"
+              autoCapitalize="none"
+              onChangeText={(text) => {
+                setNewPasswordInput(text);
+                if (changePasswordError) setChangePasswordError(null);
+              }}
+              placeholder="Ít nhất 8 ký tự (gồm chữ và số)"
+              placeholderTextColor="#94A3B8"
+              secureTextEntry
+              style={styles.editNameInput}
+              value={newPasswordInput}
+            />
+
+            <Text style={[styles.editFieldLabel, { marginTop: 12 }]}>Xác nhận mật khẩu mới *</Text>
+            <TextInput
+              accessibilityLabel="Xác nhận mật khẩu mới"
+              autoCapitalize="none"
+              onChangeText={(text) => {
+                setConfirmPasswordInput(text);
+                if (changePasswordError) setChangePasswordError(null);
+              }}
+              placeholder="Nhập lại mật khẩu mới"
+              placeholderTextColor="#94A3B8"
+              secureTextEntry
+              style={styles.editNameInput}
+              value={confirmPasswordInput}
+            />
+
+            {changePasswordError ? (
+              <Text accessibilityLiveRegion="polite" style={styles.editErrorText}>
+                {changePasswordError}
+              </Text>
+            ) : null}
+
+            <TouchableOpacity
+              accessibilityRole="button"
+              disabled={isSavingPassword}
+              onPress={() => void handleSaveNewPassword()}
+              style={[styles.editSaveBtn, isSavingPassword && { opacity: 0.6 }]}
+            >
+              {isSavingPassword ? (
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              ) : (
+                <Text style={styles.editSaveBtnText}>Cập nhật mật khẩu</Text>
               )}
             </TouchableOpacity>
           </View>
