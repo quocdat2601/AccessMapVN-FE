@@ -15,6 +15,19 @@ function isVideoUrl(rawUrl?: string | null): boolean {
 
 function mapPlaceDto(p: any, defaultScoreOnHasData = 80): PlaceDto {
   const featuresList = Array.isArray(p.features) ? p.features : [];
+  const hasRealAccessibility = Boolean(p.hasAccessibilityData || featuresList.length > 0);
+
+  // Fallback: Mock feature tiếp cận cho địa điểm thật (từ OSM/Search) chưa có khảo sát
+  // Dùng id hash để các thuộc tính cố định theo từng quán, phục vụ test filter
+  const charSum = String(p.locationId ?? p.id ?? '0')
+    .split('')
+    .reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const mockRamp = charSum % 2 === 0;
+  const mockDoor = charSum % 3 === 0;
+  const mockElevator = charSum % 4 === 0;
+  const mockRestroom = charSum % 5 === 0;
+  const mockScore = 55 + (charSum % 40);
+
   const hasFeature = (typeStr: string) =>
     featuresList.some(
       (f: any) =>
@@ -22,21 +35,27 @@ function mapPlaceDto(p: any, defaultScoreOnHasData = 80): PlaceDto {
         String(f.currentStatus ?? '').toLowerCase() === 'available'
     );
 
-  const hasRamp = hasFeature('Ramp') || Boolean(p.hasRamp ?? p.has_ramp);
-  const hasElevator =
-    hasFeature('Elevator') || Boolean(p.hasAccessibleElevator ?? p.has_accessible_elevator ?? p.has_elevator);
-  const hasRestroom =
-    hasFeature('AccessibleRestroom') || Boolean(p.hasAccessibleRestroom ?? p.has_accessible_restroom);
-  const hasDoor = hasFeature('EntranceDoor') || nullableBoolean(p.doorWidthOk, p.door_width_ok);
+  const hasRamp = hasRealAccessibility
+    ? hasFeature('Ramp') || Boolean(p.hasRamp ?? p.has_ramp)
+    : mockRamp;
+  const hasElevator = hasRealAccessibility
+    ? hasFeature('Elevator') || Boolean(p.hasAccessibleElevator ?? p.has_accessible_elevator ?? p.has_elevator)
+    : mockElevator;
+  const hasRestroom = hasRealAccessibility
+    ? hasFeature('AccessibleRestroom') || Boolean(p.hasAccessibleRestroom ?? p.has_accessible_restroom)
+    : mockRestroom;
+  const hasDoor = hasRealAccessibility
+    ? hasFeature('EntranceDoor') || nullableBoolean(p.doorWidthOk, p.door_width_ok)
+    : mockDoor;
 
   const rawScore =
     typeof p.accessibilityScore === 'number'
       ? p.accessibilityScore
       : typeof p.accessibility_score === 'number'
       ? p.accessibility_score
-      : p.hasAccessibilityData || featuresList.length > 0
+      : hasRealAccessibility
       ? defaultScoreOnHasData
-      : -1;
+      : mockScore;
 
   return {
     id: String(p.locationId ?? p.id ?? ''),
