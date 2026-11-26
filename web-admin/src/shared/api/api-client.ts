@@ -148,7 +148,10 @@ export async function refreshPortalAuth(): Promise<StoredPortalAuth | null> {
       if (!csrfToken) {
         csrfToken = await fetchPortalCsrfToken(apiBaseUrl);
       }
-      if (!csrfToken) return null;
+      if (!csrfToken) {
+        setStoredPortalAuth(null);
+        return null;
+      }
 
       const response = await fetch(`${apiBaseUrl}/api/v1/admin/auth/refresh`, {
         method: "POST",
@@ -263,17 +266,29 @@ export async function apiRequest<T>(
   }
 
   let portalAuth = getStoredPortalAuth();
-  if (!portalAuth?.accessToken) {
-    portalAuth = await refreshPortalAuth();
-  }
   let bearerToken = portalAuth?.accessToken;
 
+  // If no portalAuth is stored, check Supabase first before triggering portal cookie refresh
   if (!bearerToken) {
     const supabase = createBrowserSupabaseClient();
-    const { data, error } = await supabase.auth.getSession();
-    if (!error && data.session?.access_token) {
-      bearerToken = data.session.access_token;
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.access_token) {
+      const isExpiring = data.session.expires_at
+        ? data.session.expires_at * 1000 < Date.now() + 60000
+        : false;
+      if (isExpiring) {
+        const { data: refreshed } = await supabase.auth.refreshSession();
+        bearerToken = refreshed.session?.access_token ?? data.session.access_token;
+      } else {
+        bearerToken = data.session.access_token;
+      }
     }
+  }
+
+  // If still no token, try portal refresh
+  if (!bearerToken) {
+    portalAuth = await refreshPortalAuth();
+    bearerToken = portalAuth?.accessToken;
   }
 
   if (!bearerToken) {
@@ -295,16 +310,33 @@ export async function apiRequest<T>(
     cache: "no-store",
   });
 
-  if (response.status === 401 && portalAuth?.accessToken) {
-    const refreshed = await refreshPortalAuth();
-    if (refreshed?.accessToken) {
-      response = await fetch(targetUrl, {
-        ...options,
-        headers: buildApiHeaders(options, refreshed.accessToken, refreshed.csrfToken),
-        credentials: "include",
-        body: serializedBody,
-        cache: "no-store",
-      });
+  if (response.status === 401) {
+    if (portalAuth?.accessToken) {
+      const refreshed = await refreshPortalAuth();
+      if (refreshed?.accessToken) {
+        response = await fetch(targetUrl, {
+          ...options,
+          headers: buildApiHeaders(options, refreshed.accessToken, refreshed.csrfToken),
+          credentials: "include",
+          body: serializedBody,
+          cache: "no-store",
+        });
+      } else {
+        setStoredPortalAuth(null);
+      }
+    } else {
+      const supabase = createBrowserSupabaseClient();
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      if (refreshed.session?.access_token) {
+        bearerToken = refreshed.session.access_token;
+        response = await fetch(targetUrl, {
+          ...options,
+          headers: buildApiHeaders(options, bearerToken),
+          credentials: options.credentials,
+          body: serializedBody,
+          cache: "no-store",
+        });
+      }
     }
   }
 
