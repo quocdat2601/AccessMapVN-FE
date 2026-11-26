@@ -13,8 +13,15 @@ import {
   Sparkles,
   Info,
   ShieldCheck,
+  ShieldAlert,
+  Plus,
+  X,
 } from "lucide-react";
 import { apiRequest, getStoredPortalAuth } from "@/shared/api/api-client";
+import {
+  communityModerationRepository,
+  type CommentModerationPolicy,
+} from "@/entities/community-moderation";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/ui/card";
@@ -73,6 +80,29 @@ export default function SystemSettingsPage() {
   });
   const [healthReload, setHealthReload] = useState(0);
 
+  // Comment Moderation & Banned Keywords Policy (persisted in PostgreSQL)
+  const [commentPolicy, setCommentPolicy] = useState<CommentModerationPolicy>({
+    autoPublishComments: true,
+    editWindowMinutes: 60,
+    blockExternalLinks: true,
+    allowedDomains: ["accessmap.vn"],
+    bannedKeywords: [],
+    maxReportsPer10Minutes: 3,
+    falseReportAlertThreshold: 3,
+    repeatedTargetAlertThreshold: 3,
+    autoHideCommentReportCount: 3,
+  });
+  const [newKeywordInput, setNewKeywordInput] = useState("");
+  const [newDomainInput, setNewDomainInput] = useState("");
+  const [policySaving, setPolicySaving] = useState(false);
+
+  useEffect(() => {
+    communityModerationRepository
+      .getCommentPolicy()
+      .then((res) => setCommentPolicy(res.data))
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     async function checkServices() {
@@ -104,10 +134,42 @@ export default function SystemSettingsPage() {
     };
   }, [healthReload]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    setPolicySaving(true);
+    try {
+      const saved = await communityModerationRepository.saveCommentPolicy(commentPolicy);
+      setCommentPolicy(saved.data);
+    } catch {
+      // Keep local settings saved
+    } finally {
+      setPolicySaving(false);
+    }
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 4000);
+  };
+
+  const handleAddKeywords = () => {
+    const parts = newKeywordInput
+      .split(/[,\n]+/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (parts.length === 0) return;
+    setCommentPolicy((prev) => ({
+      ...prev,
+      bannedKeywords: Array.from(new Set([...prev.bannedKeywords, ...parts])),
+    }));
+    setNewKeywordInput("");
+  };
+
+  const handleAddDomain = () => {
+    const d = newDomainInput.trim().toLowerCase();
+    if (!d) return;
+    setCommentPolicy((prev) => ({
+      ...prev,
+      allowedDomains: Array.from(new Set([...prev.allowedDomains, d])),
+    }));
+    setNewDomainInput("");
   };
 
   const handleReset = () => {
@@ -435,6 +497,255 @@ export default function SystemSettingsPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Card 5: Quản lý Từ cấm, Chặn Web lạ & Chống Spam Báo cáo (DB-backed) */}
+      <Card className="shadow-sm border-slate-200">
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2 text-teal-700 font-semibold text-sm">
+                <ShieldAlert className="size-4" /> Kiểm duyệt Bình luận, Từ cấm &amp; Chống Spam Báo cáo
+              </div>
+              <CardTitle className="text-lg mt-0.5">
+                Bộ lọc Từ cấm động (***) &amp; Ngưỡng bảo vệ Cộng đồng
+              </CardTitle>
+              <CardDescription>
+                Lưu trực tiếp vào PostgreSQL. Áp dụng ngay lập tức cho ứng dụng Mobile khi người dùng đăng/sửa bình luận hoặc gửi báo cáo.
+              </CardDescription>
+            </div>
+            <Button
+              size="sm"
+              onClick={() => void handleSave()}
+              disabled={policySaving}
+              className="bg-teal-600 hover:bg-teal-700 text-white shrink-0"
+            >
+              <Save className="size-4" /> {policySaving ? "Đang lưu..." : "Lưu bộ lọc"}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 p-3 cursor-pointer">
+              <div>
+                <p className="text-xs font-bold text-slate-900">Đăng thẳng bình luận</p>
+                <p className="text-[11px] text-slate-500">Hiển thị ngay không chờ duyệt</p>
+              </div>
+              <input
+                type="checkbox"
+                className="size-4 accent-teal-600"
+                checked={commentPolicy.autoPublishComments}
+                onChange={(e) =>
+                  setCommentPolicy({ ...commentPolicy, autoPublishComments: e.target.checked })
+                }
+              />
+            </label>
+
+            <label className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 p-3 cursor-pointer">
+              <div>
+                <p className="text-xs font-bold text-slate-900">Chặn link / web lạ</p>
+                <p className="text-[11px] text-slate-500">Cảnh báo &amp; che *** URL lạ</p>
+              </div>
+              <input
+                type="checkbox"
+                className="size-4 accent-teal-600"
+                checked={commentPolicy.blockExternalLinks}
+                onChange={(e) =>
+                  setCommentPolicy({ ...commentPolicy, blockExternalLinks: e.target.checked })
+                }
+              />
+            </label>
+
+            <div className="rounded-xl border border-slate-200 p-3">
+              <label className="block text-xs font-bold text-slate-900 mb-1">
+                Thời hạn sửa bình luận (phút)
+              </label>
+              <input
+                type="number"
+                min={5}
+                max={1440}
+                className="h-8 w-full rounded-lg border border-slate-200 px-2.5 text-xs font-mono"
+                value={commentPolicy.editWindowMinutes}
+                onChange={(e) =>
+                  setCommentPolicy({ ...commentPolicy, editWindowMinutes: Number(e.target.value) || 60 })
+                }
+              />
+            </div>
+
+            <div className="rounded-xl border border-slate-200 p-3">
+              <label className="block text-xs font-bold text-slate-900 mb-1">
+                Giới hạn Report / 10 phút
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={30}
+                className="h-8 w-full rounded-lg border border-slate-200 px-2.5 text-xs font-mono"
+                value={commentPolicy.maxReportsPer10Minutes}
+                onChange={(e) =>
+                  setCommentPolicy({
+                    ...commentPolicy,
+                    maxReportsPer10Minutes: Number(e.target.value) || 3,
+                  })
+                }
+              />
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div className="rounded-xl border border-slate-200 p-3">
+              <label className="block text-xs font-bold text-slate-900 mb-1">
+                Cảnh báo Reporter sai (lượt/7 ngày)
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={20}
+                className="h-8 w-full rounded-lg border border-slate-200 px-2.5 text-xs font-mono"
+                value={commentPolicy.falseReportAlertThreshold}
+                onChange={(e) =>
+                  setCommentPolicy({
+                    ...commentPolicy,
+                    falseReportAlertThreshold: Number(e.target.value) || 3,
+                  })
+                }
+              />
+            </div>
+            <div className="rounded-xl border border-slate-200 p-3">
+              <label className="block text-xs font-bold text-slate-900 mb-1">
+                Cảnh báo bị report nhiều (lượt)
+              </label>
+              <input
+                type="number"
+                min={2}
+                max={20}
+                className="h-8 w-full rounded-lg border border-slate-200 px-2.5 text-xs font-mono"
+                value={commentPolicy.repeatedTargetAlertThreshold}
+                onChange={(e) =>
+                  setCommentPolicy({
+                    ...commentPolicy,
+                    repeatedTargetAlertThreshold: Number(e.target.value) || 3,
+                  })
+                }
+              />
+            </div>
+            <div className="rounded-xl border border-slate-200 p-3">
+              <label className="block text-xs font-bold text-slate-900 mb-1">
+                Tự ẩn bình luận khi đủ report (0 = tắt)
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={20}
+                className="h-8 w-full rounded-lg border border-slate-200 px-2.5 text-xs font-mono"
+                value={commentPolicy.autoHideCommentReportCount}
+                onChange={(e) =>
+                  setCommentPolicy({
+                    ...commentPolicy,
+                    autoHideCommentReportCount: Number(e.target.value) || 0,
+                  })
+                }
+              />
+            </div>
+          </div>
+
+          {/* Banned Keywords Manager */}
+          <div className="space-y-3 border-t border-slate-100 pt-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h4 className="text-sm font-bold text-slate-900">
+                  Danh sách Từ cấm ({commentPolicy.bannedKeywords.length} từ khóa)
+                </h4>
+                <p className="text-xs text-slate-500">
+                  Nhập nhiều từ cách nhau bằng dấu phẩy hoặc xuống dòng. Hệ thống tự bắt cả biến thể chèn dấu chấm/khoảng trắng.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  className="h-9 w-64 rounded-lg border border-slate-200 px-3 text-xs"
+                  placeholder="Ví dụ: webcado, lừa đảo, cá độ..."
+                  value={newKeywordInput}
+                  onChange={(e) => setNewKeywordInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleAddKeywords();
+                    }
+                  }}
+                />
+                <Button size="sm" variant="outline" onClick={handleAddKeywords}>
+                  <Plus className="size-3.5" /> Thêm từ
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5 rounded-xl border border-slate-200 bg-slate-50/70 p-3 max-h-48 overflow-y-auto">
+              {commentPolicy.bannedKeywords.map((kw) => (
+                <span
+                  key={kw}
+                  className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-white px-2.5 py-1 text-xs font-medium text-red-700"
+                >
+                  {kw}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCommentPolicy((prev) => ({
+                        ...prev,
+                        bannedKeywords: prev.bannedKeywords.filter((k) => k !== kw),
+                      }))
+                    }
+                    className="rounded-full p-0.5 hover:bg-red-100"
+                    aria-label={`Xóa ${kw}`}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+
+          {/* Allowed Domains */}
+          <div className="space-y-2 border-t border-slate-100 pt-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <h4 className="text-sm font-bold text-slate-900">
+                Tên miền hợp lệ được phép chia sẻ ({commentPolicy.allowedDomains.length})
+              </h4>
+              <div className="flex gap-2">
+                <input
+                  className="h-9 w-56 rounded-lg border border-slate-200 px-3 text-xs"
+                  placeholder="vd: gov.vn, accessmap.vn"
+                  value={newDomainInput}
+                  onChange={(e) => setNewDomainInput(e.target.value)}
+                />
+                <Button size="sm" variant="outline" onClick={handleAddDomain}>
+                  <Plus className="size-3.5" /> Thêm domain
+                </Button>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {commentPolicy.allowedDomains.map((dom) => (
+                <span
+                  key={dom}
+                  className="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-medium text-teal-800"
+                >
+                  {dom}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCommentPolicy((prev) => ({
+                        ...prev,
+                        allowedDomains: prev.allowedDomains.filter((d) => d !== dom),
+                      }))
+                    }
+                    className="rounded-full p-0.5 hover:bg-teal-100"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

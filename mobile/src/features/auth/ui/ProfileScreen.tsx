@@ -35,7 +35,12 @@ import {
   useAuth,
   validateNameRule,
 } from '../model/AuthProvider';
-import { loadSavedFavorites, subscribeFavorites } from '../model/favoritesStorage';
+import {
+  loadSavedFavorites,
+  setSessionAccessibilityFilters,
+  subscribeFavorites,
+  type SavedFavoritePlace,
+} from '../model/favoritesStorage';
 import { FavoritesModal } from './FavoritesModal';
 import { LeaderboardModal } from './LeaderboardModal';
 import { AccessibilitySettingsModal, useAccessibility } from '@/features/accessibility';
@@ -45,9 +50,13 @@ const DEFAULT_CHIP_LABELS = ['Lối đi không bậc', 'Lối vào rộng >90cm'
 
 interface ProfileScreenProps {
   hideBottomNav?: boolean;
+  onSelectFavoritePlace?: (place: SavedFavoritePlace) => void;
 }
 
-export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenProps = {}) {
+export default function ProfileScreen({
+  hideBottomNav = false,
+  onSelectFavoritePlace,
+}: ProfileScreenProps = {}) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const safeTop = Math.max(
@@ -156,6 +165,7 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
         const prefKey = `@accessmap_saved_preferences_v2_${userProfile.id}`;
         await AsyncStorage.setItem(prefKey, JSON.stringify(normalized));
         setSavedFilters(normalized);
+        setSessionAccessibilityFilters(user.id, normalized);
         await saveUserAccessibilityPreferences(normalized as unknown as Record<string, unknown>);
       } finally {
         setIsSavingPrefs(false);
@@ -785,7 +795,7 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
           if (!isSavingProfileName) setShowEditProfileModal(false);
         }}
       >
-        <KeyboardAvoidingView behavior="padding" style={styles.editModalBackdrop}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.editModalBackdrop}>
           <Pressable
             style={StyleSheet.absoluteFill}
             onPress={() => {
@@ -875,7 +885,7 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
           if (!isSavingPassword) setShowChangePasswordModal(false);
         }}
       >
-        <KeyboardAvoidingView behavior="padding" style={styles.editModalBackdrop}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.editModalBackdrop}>
           <Pressable
             style={StyleSheet.absoluteFill}
             onPress={() => {
@@ -958,6 +968,7 @@ export default function ProfileScreen({ hideBottomNav = false }: ProfileScreenPr
         visible={showFavorites}
         isGuest={isGuest}
         onClose={() => setShowFavorites(false)}
+        onSelectPlace={onSelectFavoritePlace}
       />
 
       <ContributionHistorySheet

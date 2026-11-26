@@ -207,28 +207,53 @@ function LeaderboardSkeleton() {
  * Empty State Component with Call-To-Action
  */
 interface LeaderboardEmptyStateProps {
+  isGuest?: boolean;
   onStartContribution?: () => void;
+  onLoginPress?: () => void;
 }
 
-function LeaderboardEmptyState({ onStartContribution }: LeaderboardEmptyStateProps) {
+function LeaderboardEmptyState({
+  isGuest = false,
+  onStartContribution,
+  onLoginPress,
+}: LeaderboardEmptyStateProps) {
   return (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconCircle}>
-        <MaterialCommunityIcons name="trophy-outline" size={48} color="#006874" />
+        <MaterialCommunityIcons
+          name={isGuest ? 'account-lock-outline' : 'trophy-outline'}
+          size={48}
+          color="#006874"
+        />
       </View>
-      <Text style={styles.emptyTitle}>Chưa có dữ liệu bảng xếp hạng</Text>
-      <Text style={styles.emptySubtitle}>
-        Hãy là người tiên phong khảo sát tiếp cận và đóng góp vị trí để vinh danh trên bục vàng uy tín cộng đồng!
+      <Text style={styles.emptyTitle}>
+        {isGuest ? 'Đăng nhập để xem Bảng xếp hạng' : 'Chưa có dữ liệu bảng xếp hạng'}
       </Text>
-      {onStartContribution && (
+      <Text style={styles.emptySubtitle}>
+        {isGuest
+          ? 'Bảng xếp hạng uy tín cộng đồng yêu cầu phiên đăng nhập xác thực. Hãy đăng nhập để theo dõi Top thành viên và tích lũy điểm danh vọng!'
+          : 'Hãy là người tiên phong khảo sát tiếp cận và đóng góp vị trí để vinh danh trên bục vàng uy tín cộng đồng!'}
+      </Text>
+      {isGuest && onLoginPress ? (
         <TouchableOpacity
           style={styles.emptyActionBtn}
-          onPress={onStartContribution}
+          onPress={onLoginPress}
           activeOpacity={0.85}
         >
-          <Ionicons name="add-circle" size={18} color="#FFFFFF" />
-          <Text style={styles.emptyActionBtnText}>Bắt đầu đóng góp ngay</Text>
+          <Ionicons name="log-in-outline" size={18} color="#FFFFFF" />
+          <Text style={styles.emptyActionBtnText}>Đăng nhập ngay</Text>
         </TouchableOpacity>
+      ) : (
+        onStartContribution && (
+          <TouchableOpacity
+            style={styles.emptyActionBtn}
+            onPress={onStartContribution}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="add-circle" size={18} color="#FFFFFF" />
+            <Text style={styles.emptyActionBtnText}>Bắt đầu đóng góp ngay</Text>
+          </TouchableOpacity>
+        )
       )}
     </View>
   );
@@ -579,7 +604,11 @@ export function LeaderboardContent({ isGuest, onStartContribution }: Leaderboard
         <LeaderboardSkeleton />
       ) : leaderboard.length === 0 ? (
         /* Empty State */
-        <LeaderboardEmptyState onStartContribution={handleStartContribution} />
+        <LeaderboardEmptyState
+          isGuest={isGuest}
+          onStartContribution={handleStartContribution}
+          onLoginPress={() => router.push('/login' as any)}
+        />
       ) : (
         /* Podium & List */
         <View style={styles.leaderboardSection}>

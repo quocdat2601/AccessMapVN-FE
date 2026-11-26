@@ -309,7 +309,12 @@ async function request<T>(endpoint: string, options: RequestOptions = {}): Promi
       signal: rest.signal ?? controller.signal,
     });
   } catch (error) {
-    if (error instanceof Error && (error.name === 'AbortError' || error.message.includes('abort'))) {
+    if (
+      error instanceof Error &&
+      (error.name === 'AbortError' ||
+        error.message.toLowerCase().includes('abort') ||
+        error.message.toLowerCase().includes('cancel'))
+    ) {
       throw new ApiError('Kết nối máy chủ quá thời gian (Timeout).', 408, {
         code: 'TIMEOUT',
         message: 'Request timed out.',

@@ -10,10 +10,14 @@ export {
   fetchCommunityComments,
   fetchCommunityCommentPage,
   submitCommunityComment,
+  updateCommunityComment,
+  deleteCommunityComment,
+  reportCommunityComment,
 } from './api/communityApi';
 export type {
   AccessibilityFeatureType,
   CastCommunityVoteInput,
+  CommentViolationCategory,
   CommunityCommentStatus,
   CommunityFeatureInput,
   CommunityFeatureState,

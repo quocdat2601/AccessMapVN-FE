@@ -146,10 +146,13 @@ export async function loadSavedFavorites(syncWithServer = false): Promise<SavedF
         merged.map(async (item) => {
           if (item.name !== 'Địa điểm đã lưu' && item.address) return item;
           try {
-            const detail = await apiClient.get<any>(`/api/v1/places/${encodeURIComponent(item.id)}`, {
+            const detail = await apiClient.get<any>(`/api/v1/locations/${encodeURIComponent(item.id)}`, {
               auth: 'optional',
             });
             if (detail && typeof detail.name === 'string' && detail.name.trim()) {
+              const feats = Array.isArray(detail.features) ? detail.features : [];
+              const hasAvail = (type: string) =>
+                feats.some((f: any) => f?.featureType === type && f?.currentStatus === 'Available');
               return {
                 ...item,
                 name: detail.name.trim(),
@@ -157,6 +160,15 @@ export async function loadSavedFavorites(syncWithServer = false): Promise<SavedF
                 category: detail.category ?? item.category,
                 lat: typeof detail.latitude === 'number' ? detail.latitude : item.lat,
                 lng: typeof detail.longitude === 'number' ? detail.longitude : item.lng,
+                hasRamp: feats.length > 0 ? hasAvail('Ramp') : item.hasRamp,
+                hasAccessibleElevator: feats.length > 0 ? hasAvail('Elevator') : item.hasAccessibleElevator,
+                hasAccessibleRestroom: feats.length > 0 ? hasAvail('AccessibleRestroom') : item.hasAccessibleRestroom,
+                hasTactilePaving: feats.length > 0 ? hasAvail('TactilePaving') : item.hasTactilePaving,
+                doorWidthOk: feats.length > 0 ? hasAvail('EntranceDoor') : item.doorWidthOk,
+                accessibilityScore:
+                  detail.hasAccessibilityData && (item.accessibilityScore == null || item.accessibilityScore < 0)
+                    ? 80
+                    : item.accessibilityScore,
               };
             }
           } catch {
@@ -266,4 +278,48 @@ export async function updateSavedFavoriteMeta(
   await AsyncStorage.setItem(storageKey, JSON.stringify(next));
   notify(next);
   return next;
+}
+
+// --- Pending Map Focus & Session Filter Memory ---
+
+type MapFocusListener = (place: SavedFavoritePlace) => void;
+const mapFocusListeners = new Set<MapFocusListener>();
+let pendingFavoriteMapFocus: SavedFavoritePlace | null = null;
+
+export function requestFavoriteMapFocus(place: SavedFavoritePlace): void {
+  pendingFavoriteMapFocus = place;
+  mapFocusListeners.forEach((fn) => fn(place));
+}
+
+export function consumePendingFavoriteMapFocus(): SavedFavoritePlace | null {
+  const item = pendingFavoriteMapFocus;
+  pendingFavoriteMapFocus = null;
+  return item;
+}
+
+export function subscribeFavoriteMapFocus(listener: MapFocusListener): () => void {
+  mapFocusListeners.add(listener);
+  return () => {
+    mapFocusListeners.delete(listener);
+  };
+}
+
+const sessionFiltersByUser = new Map<string, unknown>();
+
+export function getSessionAccessibilityFilters<T>(userId: string | null | undefined): T | undefined {
+  if (!userId) return undefined;
+  return sessionFiltersByUser.get(userId) as T | undefined;
+}
+
+export function setSessionAccessibilityFilters<T>(userId: string | null | undefined, filters: T): void {
+  if (!userId) return;
+  sessionFiltersByUser.set(userId, filters);
+}
+
+export function clearSessionAccessibilityFilters(userId?: string | null): void {
+  if (userId) {
+    sessionFiltersByUser.delete(userId);
+  } else {
+    sessionFiltersByUser.clear();
+  }
 }

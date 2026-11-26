@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   Award,
@@ -618,7 +619,12 @@ export default function AdminUsersReputationPage() {
                       {users.map((u) => (
                         <tr key={u.id} className="hover:bg-slate-50/70">
                           <td className="py-3 pr-3">
-                            <div className="font-semibold text-slate-900">{u.name}</div>
+                            <Link
+                              href={`/admin/nguoi-dung-uy-tin/${encodeURIComponent(u.id)}`}
+                              className="font-semibold text-teal-700 hover:underline"
+                            >
+                              {u.name}
+                            </Link>
                             <div className="text-xs text-slate-500">{u.email}</div>
                             <div className="font-mono text-[11px] text-slate-400">{u.id}</div>
                           </td>
@@ -637,6 +643,12 @@ export default function AdminUsersReputationPage() {
                           </td>
                           <td className="py-3 pl-3 text-right">
                             <div className="flex justify-end gap-1.5">
+                              <Link
+                                href={`/admin/nguoi-dung-uy-tin/${encodeURIComponent(u.id)}`}
+                                className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                              >
+                                Hồ sơ
+                              </Link>
                               <Button
                                 size="sm"
                                 variant="outline"

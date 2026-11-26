@@ -76,11 +76,18 @@ export interface PublicTimelineItem {
 
 export interface PublicCommunityComment {
   id: string;
+  commentId?: string;
   body: string;
   authorLabel: string;
   createdAt: string;
   recencyWeight: number;
   isRecentContext: boolean;
+  version?: number;
+  isMine?: boolean;
+  isEdited?: boolean;
+  editableUntil?: string | null;
+  parentCommentId?: string | null;
+  replyToAuthorLabel?: string | null;
 }
 
 export interface PublicCommunityCommentPage {
@@ -90,9 +97,18 @@ export interface PublicCommunityCommentPage {
 
 export type CommunityCommentStatus = 'PendingReview' | 'Approved' | 'Hidden';
 
+export type CommentViolationCategory =
+  | 'SpamAdvertising'
+  | 'HarassmentHate'
+  | 'PrivacyThreat'
+  | 'CoordinatedManipulation'
+  | 'Other';
+
 export interface CreateCommunityCommentResponse {
   commentId: string;
   status: CommunityCommentStatus;
   version: number;
   createdAt: string;
+  wasCensored?: boolean;
+  matchedTerms?: string[];
 }

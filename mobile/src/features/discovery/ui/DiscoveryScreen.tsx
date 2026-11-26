@@ -7,10 +7,17 @@ import {
   saveUserAccessibilityPreferences,
 } from '@/features/auth/model/AuthProvider';
 import {
+  clearSessionAccessibilityFilters,
+  consumePendingFavoriteMapFocus,
+  getSessionAccessibilityFilters,
   loadSavedFavorites,
+  setSessionAccessibilityFilters,
+  subscribeFavoriteMapFocus,
   subscribeFavorites,
   toggleSavedFavorite,
+  type SavedFavoritePlace,
 } from '@/features/auth/model/favoritesStorage';
+import { apiClient } from '@/shared/api/client';
 import { Colors } from '@/shared/theme';
 import { BottomNavBar } from '@/shared/ui/BottomNavBar';
 import { LoginRequiredModal } from '@/shared/ui/LoginRequiredModal';
@@ -98,30 +105,28 @@ export function DiscoveryScreen({
   const [isSavingPrefs, setIsSavingPrefs] = useState<boolean>(false);
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
 
+  const userId = user?.id ?? null;
+
+  const applySessionAccessibilityFilters = useCallback(
+    (next: AccessibilityFilterState) => {
+      setAccessibilityFilters(next);
+      if (userId) {
+        setSessionAccessibilityFilters(userId, next);
+      }
+    },
+    [userId]
+  );
+
   useEffect(() => {
     let active = true;
     async function loadSavedPreferencesAndFavorites() {
-      if (!user) {
+      if (!userId) {
+        clearSessionAccessibilityFilters();
         if (active) {
           setAccessibilityFilters(DEFAULT_ACCESSIBILITY_FILTERS);
           setFavoriteIds([]);
         }
         return;
-      }
-
-      const prefKey = `@accessmap_saved_preferences_v2_${user.id}`;
-      let hasLocalPrefs = false;
-      try {
-        const localRaw = await AsyncStorage.getItem(prefKey);
-        if (localRaw && active) {
-          const parsed = JSON.parse(localRaw) as Partial<AccessibilityFilterState>;
-          setAccessibilityFilters(normalizeAccessibilityFilters(parsed));
-          hasLocalPrefs = true;
-        }
-      } catch { }
-
-      if (!hasLocalPrefs && active) {
-        setAccessibilityFilters(DEFAULT_ACCESSIBILITY_FILTERS);
       }
 
       try {
@@ -131,21 +136,51 @@ export function DiscoveryScreen({
         }
       } catch { }
 
+      // Preserve user's in-session filter toggle/reset across tab switches & remounts
+      const sessionCached = getSessionAccessibilityFilters<AccessibilityFilterState>(userId);
+      if (sessionCached) {
+        if (active) {
+          setAccessibilityFilters(sessionCached);
+        }
+        return;
+      }
+
+      const prefKey = `@accessmap_saved_preferences_v2_${userId}`;
+      let resolvedPrefs: AccessibilityFilterState = DEFAULT_ACCESSIBILITY_FILTERS;
+      try {
+        const localRaw = await AsyncStorage.getItem(prefKey);
+        if (localRaw && active) {
+          const parsed = JSON.parse(localRaw) as Partial<AccessibilityFilterState>;
+          resolvedPrefs = normalizeAccessibilityFilters(parsed);
+          setAccessibilityFilters(resolvedPrefs);
+        } else if (active) {
+          setAccessibilityFilters(DEFAULT_ACCESSIBILITY_FILTERS);
+        }
+      } catch {
+        if (active) {
+          setAccessibilityFilters(DEFAULT_ACCESSIBILITY_FILTERS);
+        }
+      }
+
       try {
         const serverPrefs = await fetchUserAccessibilityPreferences();
         if (active && serverPrefs && Object.keys(serverPrefs).length > 0) {
-          const merged = normalizeAccessibilityFilters(serverPrefs as Partial<AccessibilityFilterState>);
-          setAccessibilityFilters(merged);
-          void AsyncStorage.setItem(prefKey, JSON.stringify(merged));
+          resolvedPrefs = normalizeAccessibilityFilters(serverPrefs as Partial<AccessibilityFilterState>);
+          setAccessibilityFilters(resolvedPrefs);
+          void AsyncStorage.setItem(prefKey, JSON.stringify(resolvedPrefs));
         }
       } catch { }
+
+      if (active) {
+        setSessionAccessibilityFilters(userId, resolvedPrefs);
+      }
     }
 
     void loadSavedPreferencesAndFavorites();
     return () => {
       active = false;
     };
-  }, [user]);
+  }, [userId]);
 
   useEffect(() => {
     return subscribeFavorites((items) => {
@@ -180,7 +215,7 @@ export function DiscoveryScreen({
         const normalized = normalizeAccessibilityFilters(filters);
         const prefKey = `@accessmap_saved_preferences_v2_${user.id}`;
         await AsyncStorage.setItem(prefKey, JSON.stringify(normalized));
-        setAccessibilityFilters(normalized);
+        applySessionAccessibilityFilters(normalized);
         await saveUserAccessibilityPreferences(normalized as unknown as Record<string, unknown>);
         Alert.alert(
           'Đã lưu hồ sơ tiếp cận',
@@ -199,6 +234,8 @@ export function DiscoveryScreen({
     return countActiveAccessibilityFilters(accessibilityFilters);
   }, [accessibilityFilters]);
 
+  const activePlace = osmPlace ?? selectedPlace;
+
   const filteredPlaces = useMemo(() => {
     const categoryFiltered = places.filter((p) => {
       if (selectedCategory !== 'all') {
@@ -212,8 +249,12 @@ export function DiscoveryScreen({
       return true;
     });
 
-    return filterAndSortPlacesByAccessibility(categoryFiltered, accessibilityFilters);
-  }, [places, selectedCategory, accessibilityFilters]);
+    const sorted = filterAndSortPlacesByAccessibility(categoryFiltered, accessibilityFilters);
+    if (activePlace && !activePlace.id.startsWith('search-') && !sorted.some((p) => p.id === activePlace.id)) {
+      return [activePlace, ...sorted];
+    }
+    return sorted;
+  }, [places, selectedCategory, accessibilityFilters, activePlace]);
 
   useFocusEffect(
     useCallback(() => {
@@ -221,12 +262,97 @@ export function DiscoveryScreen({
     }, [refresh])
   );
 
-  const activePlace = osmPlace ?? selectedPlace;
-
   useEffect(() => {
     onActivePlaceChange?.(Boolean(activePlace));
   }, [activePlace, onActivePlaceChange]);
   const hasCenteredUser = useRef(false);
+
+  const focusFavoriteOnMap = useCallback(
+    async (fav: SavedFavoritePlace) => {
+      // Prevent initial GPS auto-recenter from overriding the selected favorite place
+      hasCenteredUser.current = true;
+      setShowResults(false);
+      setIsSearchFocused(false);
+      Keyboard.dismiss();
+
+      const existing = places.find((p) => p.id === fav.id);
+      const baseDto: PlaceDto = existing ?? {
+        id: fav.id,
+        name: fav.customName?.trim() || fav.name || 'Địa điểm yêu thích',
+        category: fav.category || 'other',
+        address: fav.address ?? null,
+        lng: typeof fav.lng === 'number' ? fav.lng : S901_CENTER.longitude,
+        lat: typeof fav.lat === 'number' ? fav.lat : S901_CENTER.latitude,
+        has_ramp: Boolean(fav.hasRamp),
+        has_elevator: Boolean(fav.hasAccessibleElevator),
+        has_accessible_elevator: Boolean(fav.hasAccessibleElevator),
+        has_tactile_paving: Boolean(fav.hasTactilePaving),
+        has_accessible_restroom: Boolean(fav.hasAccessibleRestroom),
+        door_width_ok: Boolean(fav.doorWidthOk),
+        accessibility_score: typeof fav.accessibilityScore === 'number' ? fav.accessibilityScore : -1,
+        accessibility_note: null,
+      };
+
+      if (typeof fav.lng === 'number' && typeof fav.lat === 'number') {
+        setOsmPlace(baseDto);
+        selectPlace(fav.id);
+        mapViewRef.current?.flyTo(fav.lng, fav.lat, 17);
+        setTimeout(() => {
+          mapViewRef.current?.flyTo(fav.lng!, fav.lat!, 17);
+        }, 160);
+      }
+
+      // Hydrate latest coordinates & published accessibility features from server if available
+      try {
+        const detail = await apiClient.get<any>(`/api/v1/locations/${encodeURIComponent(fav.id)}`, {
+          auth: 'optional',
+        });
+        if (detail && typeof detail.latitude === 'number' && typeof detail.longitude === 'number') {
+          const feats = Array.isArray(detail.features) ? detail.features : [];
+          const hasAvail = (type: string) =>
+            feats.some((f: any) => f?.featureType === type && f?.currentStatus === 'Available');
+          const hydratedDto: PlaceDto = {
+            ...baseDto,
+            name: fav.customName?.trim() || detail.name || baseDto.name,
+            address: detail.formattedAddress ?? detail.address ?? baseDto.address,
+            lng: detail.longitude,
+            lat: detail.latitude,
+            has_ramp: feats.length > 0 ? hasAvail('Ramp') : baseDto.has_ramp,
+            has_elevator: feats.length > 0 ? hasAvail('Elevator') : baseDto.has_elevator,
+            has_accessible_elevator: feats.length > 0 ? hasAvail('Elevator') : baseDto.has_accessible_elevator,
+            has_accessible_restroom: feats.length > 0 ? hasAvail('AccessibleRestroom') : baseDto.has_accessible_restroom,
+            has_tactile_paving: feats.length > 0 ? hasAvail('TactilePaving') : baseDto.has_tactile_paving,
+            door_width_ok: feats.length > 0 ? hasAvail('EntranceDoor') : baseDto.door_width_ok,
+            accessibility_score:
+              detail.hasAccessibilityData && baseDto.accessibility_score < 0 ? 80 : baseDto.accessibility_score,
+          };
+          setOsmPlace(hydratedDto);
+          selectPlace(fav.id);
+          mapViewRef.current?.flyTo(detail.longitude, detail.latitude, 17);
+        } else if (typeof fav.lng !== 'number' || typeof fav.lat !== 'number') {
+          setOsmPlace(baseDto);
+          selectPlace(fav.id);
+        }
+      } catch {
+        if (typeof fav.lng !== 'number' || typeof fav.lat !== 'number') {
+          setOsmPlace(baseDto);
+          selectPlace(fav.id);
+        }
+      }
+    },
+    [places, selectPlace]
+  );
+
+  useEffect(() => {
+    const initialPending = consumePendingFavoriteMapFocus();
+    if (initialPending) {
+      void focusFavoriteOnMap(initialPending);
+    }
+    return subscribeFavoriteMapFocus((place) => {
+      consumePendingFavoriteMapFocus();
+      void focusFavoriteOnMap(place);
+    });
+  }, [focusFavoriteOnMap]);
 
   // Android Back Handler / Return Gesture
   useEffect(() => {
@@ -282,6 +408,7 @@ export function DiscoveryScreen({
   }, [searchQuery, location?.latitude, location?.longitude]);
 
   const handleSelectSearchResult = (result: GeocodeResult) => {
+    hasCenteredUser.current = true;
     setShowResults(false);
     setIsSearchFocused(false);
     Keyboard.dismiss();
@@ -424,9 +551,9 @@ export function DiscoveryScreen({
               nestedScrollEnabled
               showsVerticalScrollIndicator={true}
             >
-              {searchResults.map((item) => (
+              {searchResults.map((item, idx) => (
                 <TouchableOpacity
-                  key={item.id}
+                  key={`${item.id}-${item.source || 'item'}-${idx}`}
                   style={[styles.resultItem, item.source === 'accessmap' && styles.resultItemAccessMap]}
                   onPress={() => handleSelectSearchResult(item)}
                   activeOpacity={0.7}
@@ -471,17 +598,17 @@ export function DiscoveryScreen({
                     ? `🎯 ${filteredPlaces.length} địa điểm tiếp cận phù hợp`
                     : '⚠️ Không có địa điểm nào phù hợp'}
                 </Text>
-                {filteredPlaces.length === 0 && (
-                  <TouchableOpacity
-                    onPress={() => {
-                      setSelectedCategory('all');
-                      setAccessibilityFilters(DEFAULT_ACCESSIBILITY_FILTERS);
-                    }}
-                    style={styles.resetFilterMiniBtn}
-                  >
-                    <Text style={styles.resetFilterMiniText}>Đặt lại</Text>
-                  </TouchableOpacity>
-                )}
+                <TouchableOpacity
+                  onPress={() => {
+                    setSelectedCategory('all');
+                    applySessionAccessibilityFilters(DEFAULT_ACCESSIBILITY_FILTERS);
+                  }}
+                  style={styles.resetFilterMiniBtn}
+                >
+                  <Text style={styles.resetFilterMiniText}>
+                    {filteredPlaces.length > 0 ? 'Tắt lọc' : 'Đặt lại'}
+                  </Text>
+                </TouchableOpacity>
               </View>
             )}
           </>
@@ -606,7 +733,7 @@ export function DiscoveryScreen({
       <AccessibilityFilterModal
         visible={showAccessibilityModal}
         currentFilters={accessibilityFilters}
-        onApply={(newFilters) => setAccessibilityFilters(newFilters)}
+        onApply={(newFilters) => applySessionAccessibilityFilters(newFilters)}
         onSaveDefault={handleSaveDefaultPreferences}
         isSavingDefault={isSavingPrefs}
         onClose={() => setShowAccessibilityModal(false)}

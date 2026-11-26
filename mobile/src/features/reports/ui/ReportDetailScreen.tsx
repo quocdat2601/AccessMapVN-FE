@@ -5,6 +5,8 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -165,7 +167,8 @@ export function ReportDetailScreen() {
       {loading ? (
         <View style={styles.centered}><ActivityIndicator color="#006874" size="large" /></View>
       ) : (
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
           {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
           {report ? (
             <>
@@ -251,6 +254,7 @@ export function ReportDetailScreen() {
             </>
           ) : null}
         </ScrollView>
+        </KeyboardAvoidingView>
       )}
     </SafeAreaView>
   );

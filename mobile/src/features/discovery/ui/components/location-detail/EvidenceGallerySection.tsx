@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Modal,
@@ -19,6 +20,7 @@ import { EvidenceItem } from './types';
 
 interface EvidenceGallerySectionProps {
   evidence: EvidenceItem[];
+  isLoading?: boolean;
   onAddEvidence?: () => void;
   onViewAll?: () => void;
   showDemoContent?: boolean;
@@ -67,6 +69,7 @@ function EvidenceIllustration() {
 
 export function EvidenceGallerySection({
   evidence = [],
+  isLoading = false,
   onAddEvidence,
   onViewAll,
   showDemoContent = false,
@@ -260,9 +263,9 @@ export function EvidenceGallerySection({
             <Text style={[styles.newBadgeText, isVerified && styles.newBadgeVerified]}>
               {isVerified ? '3 ảnh thẩm định' : '3 ảnh mới'}
             </Text>
-          ) : (
+          ) : !isLoading || evidence.length > 0 ? (
             <Text style={styles.newBadgeText}>{evidence.length}</Text>
-          )}
+          ) : null}
         </View>
 
         {hasItems ? (
@@ -292,7 +295,15 @@ export function EvidenceGallerySection({
         )}
       </View>
 
-      {!hasItems ? (
+      {isLoading && !hasItems ? (
+        <View style={styles.emptyState}>
+          <ActivityIndicator size="small" color="#006874" />
+          <View style={styles.emptyCopy}>
+            <Text style={styles.emptyTitle}>Đang tải ảnh & bằng chứng...</Text>
+            <Text style={styles.emptyText}>Đang lấy hình ảnh minh chứng tiếp cận của địa điểm.</Text>
+          </View>
+        </View>
+      ) : !hasItems ? (
         <View style={styles.emptyState}>
           <MaterialCommunityIcons name="camera-plus-outline" size={22} color="#007D78" />
           <View style={styles.emptyCopy}>

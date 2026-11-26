@@ -21,6 +21,7 @@ import { Colors } from '@/shared/theme';
 import {
   loadSavedFavorites,
   removeSavedFavoriteById,
+  requestFavoriteMapFocus,
   subscribeFavorites,
   updateSavedFavoriteMeta,
   type FavoriteCategoryPreset,
@@ -203,6 +204,7 @@ export function FavoritesModal({ visible, isGuest, onClose, onSelectPlace }: Fav
       onClose();
       return;
     }
+    requestFavoriteMapFocus(place);
     onClose();
     router.replace('/map' as any);
   };
@@ -362,13 +364,20 @@ export function FavoritesModal({ visible, isGuest, onClose, onSelectPlace }: Fav
             if (!isSavingMeta) setEditingPlace(null);
           }}
         >
-          <KeyboardAvoidingView behavior="padding" style={styles.editBackdrop}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.editBackdrop}>
             <Pressable
               style={StyleSheet.absoluteFill}
               onPress={() => {
                 if (!isSavingMeta) setEditingPlace(null);
               }}
             />
+            <ScrollView
+              bounces={false}
+              keyboardShouldPersistTaps="handled"
+              automaticallyAdjustKeyboardInsets
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end' }}
+            >
             <View style={styles.editSheet}>
               <View style={styles.sheetHandle} />
               <View style={styles.editHeader}>
@@ -455,6 +464,7 @@ export function FavoritesModal({ visible, isGuest, onClose, onSelectPlace }: Fav
                 <Text style={styles.cancelMetaBtnText}>Hủy bỏ</Text>
               </TouchableOpacity>
             </View>
+            </ScrollView>
           </KeyboardAvoidingView>
         </Modal>
       </View>

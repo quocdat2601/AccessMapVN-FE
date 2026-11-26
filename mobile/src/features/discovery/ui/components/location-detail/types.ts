@@ -67,4 +67,9 @@ export interface CommunityReview {
   status?: CommunityCommentStatus;
   isOwn?: boolean;
   createdAtIso?: string;
+  version?: number;
+  isEdited?: boolean;
+  editableUntilIso?: string | null;
+  parentCommentId?: string | null;
+  replyToAuthorLabel?: string | null;
 }

@@ -11,6 +11,7 @@ import { DiscoveryScreen } from '@/features/discovery';
 import { startContributionFlow } from '@/features/contribution';
 import { CommunityScreen } from '@/features/community';
 import { ProfileScreen } from '@/features/auth';
+import { requestFavoriteMapFocus, type SavedFavoritePlace } from '@/features/auth/model/favoritesStorage';
 import { BottomNavBar, type BottomNavTab } from './BottomNavBar';
 
 export type MainNavTab = 'map' | 'community' | 'profile';
@@ -149,7 +150,13 @@ export function MainTabContainer({ initialTab = 'map' }: MainTabContainerProps) 
             ]}
             pointerEvents={activeTab === 'profile' && !prevTab ? 'auto' : 'none'}
           >
-            <ProfileScreen hideBottomNav={true} />
+            <ProfileScreen
+              hideBottomNav={true}
+              onSelectFavoritePlace={(place: SavedFavoritePlace) => {
+                handleTabPress('map');
+                requestFavoriteMapFocus(place);
+              }}
+            />
           </Animated.View>
         )}
       </View>

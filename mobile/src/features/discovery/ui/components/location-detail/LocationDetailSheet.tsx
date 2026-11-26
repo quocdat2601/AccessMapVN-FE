@@ -27,6 +27,13 @@ import { fetchPlaceEvidence } from '@/entities/place';
 import { apiClient, resolveServiceUrl } from '@/shared/api/client';
 import { useAuth } from '@/features/auth';
 import { LoginRequiredModal } from '@/shared/ui/LoginRequiredModal';
+
+const reviewsCacheByPlaceId = new Map<string, CommunityReview[]>();
+const evidenceCacheByPlaceId = new Map<string, EvidenceItem[]>();
+const featureCacheByPlaceId = new Map<
+  string,
+  Partial<Record<AccessibilityFeatureType, CommunityFeatureState>>
+>();
 import {
   castCommunityVote,
   fetchCommunityState,
@@ -460,6 +467,10 @@ export function LocationDetailSheet({
 
   useEffect(() => {
     let isMounted = true;
+    const cachedFeatures = featureCacheByPlaceId.get(place.id);
+    if (cachedFeatures) {
+      setLiveFeatureStates(cachedFeatures);
+    }
     const coreTypes: AccessibilityFeatureType[] = ['Ramp', 'EntranceDoor', 'Elevator', 'AccessibleRestroom'];
     void Promise.all(
       coreTypes.map(async (featureType) => {
@@ -475,6 +486,7 @@ export function LocationDetailSheet({
       results.forEach((item) => {
         if (item) next[item.featureType] = item;
       });
+      featureCacheByPlaceId.set(place.id, next);
       setLiveFeatureStates(next);
     });
     return () => {
@@ -482,8 +494,39 @@ export function LocationDetailSheet({
     };
   }, [place.id, verificationRefreshKey]);
 
-  const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>([]);
-  const [communityReviews, setCommunityReviews] = useState<CommunityReview[]>([]);
+  const [evidenceList, setEvidenceList] = useState<EvidenceItem[]>(
+    () => evidenceCacheByPlaceId.get(place.id) ?? []
+  );
+  const [communityReviews, setCommunityReviews] = useState<CommunityReview[]>(
+    () => reviewsCacheByPlaceId.get(place.id) ?? []
+  );
+  const [loadedEvidencePlaceId, setLoadedEvidencePlaceId] = useState<string | null>(
+    () => (evidenceCacheByPlaceId.has(place.id) ? place.id : null)
+  );
+  const [loadedCommentsPlaceId, setLoadedCommentsPlaceId] = useState<string | null>(
+    () => (reviewsCacheByPlaceId.has(place.id) ? place.id : null)
+  );
+  const [isLoadingEvidence, setIsLoadingEvidence] = useState(
+    () => !evidenceCacheByPlaceId.has(place.id)
+  );
+  const [isLoadingComments, setIsLoadingComments] = useState(
+    () => !reviewsCacheByPlaceId.has(place.id)
+  );
+
+  const activeReviews =
+    loadedCommentsPlaceId === place.id
+      ? communityReviews
+      : (reviewsCacheByPlaceId.get(place.id) ?? []);
+  const activeEvidence =
+    loadedEvidencePlaceId === place.id
+      ? evidenceList
+      : (evidenceCacheByPlaceId.get(place.id) ?? []);
+  const effectiveCommentsLoading =
+    (loadedCommentsPlaceId !== place.id && !reviewsCacheByPlaceId.has(place.id)) ||
+    (isLoadingComments && activeReviews.length === 0);
+  const effectiveEvidenceLoading =
+    (loadedEvidencePlaceId !== place.id && !evidenceCacheByPlaceId.has(place.id)) ||
+    (isLoadingEvidence && activeEvidence.length === 0);
 
   useEffect(() => {
     let isMounted = true;
@@ -549,6 +592,16 @@ export function LocationDetailSheet({
     }
 
     async function loadEvidence() {
+      const cached = evidenceCacheByPlaceId.get(place.id);
+      if (isMounted) {
+        if (cached) {
+          setEvidenceList(cached);
+          setLoadedEvidencePlaceId(place.id);
+          setIsLoadingEvidence(false);
+        } else {
+          setIsLoadingEvidence(true);
+        }
+      }
       const items: EvidenceItem[] = [];
       const seenUrls = new Set<string>();
 
@@ -599,19 +652,24 @@ export function LocationDetailSheet({
       }
 
       if (isMounted) {
+        evidenceCacheByPlaceId.set(place.id, items);
         setEvidenceList(items);
+        setLoadedEvidencePlaceId(place.id);
+        setIsLoadingEvidence(false);
       }
     }
 
     async function loadComments() {
-      let localOwnComments: CommunityReview[] = [];
-      try {
-        const rawLocal = await AsyncStorage.getItem(myCommentsStorageKey);
-        if (rawLocal) {
-          localOwnComments = JSON.parse(rawLocal);
+      const cached = reviewsCacheByPlaceId.get(place.id);
+      if (isMounted) {
+        if (cached) {
+          setCommunityReviews(cached);
+          setLoadedCommentsPlaceId(place.id);
+          setIsLoadingComments(false);
+        } else {
+          setIsLoadingComments(true);
         }
-      } catch {}
-
+      }
       let remoteMapped: CommunityReview[] = [];
       try {
         const items = await fetchCommunityComments(place.id);
@@ -630,19 +688,24 @@ export function LocationDetailSheet({
               likesCount: Math.max(1, Math.round((c.recencyWeight || 1) * 4)),
               comment: c.body,
               status: 'Approved',
+              isOwn: Boolean(c.isMine),
               createdAtIso: c.createdAt,
+              version: c.version ?? 1,
+              isEdited: Boolean(c.isEdited),
+              editableUntilIso: c.editableUntil ?? null,
+              parentCommentId: c.parentCommentId ?? null,
+              replyToAuthorLabel: c.replyToAuthorLabel ?? null,
             };
           });
         }
-      } catch {}
-
-      if (isMounted) {
-        const remoteIds = new Set(remoteMapped.map((r) => r.id));
-        const remoteBodies = new Set(remoteMapped.map((r) => r.comment.trim()));
-        const pendingOwn = localOwnComments.filter(
-          (loc) => !remoteIds.has(loc.id) && !remoteBodies.has(loc.comment.trim())
-        );
-        setCommunityReviews([...pendingOwn, ...remoteMapped]);
+      } catch {
+      } finally {
+        if (isMounted) {
+          reviewsCacheByPlaceId.set(place.id, remoteMapped);
+          setCommunityReviews(remoteMapped);
+          setLoadedCommentsPlaceId(place.id);
+          setIsLoadingComments(false);
+        }
       }
     }
 
@@ -716,17 +779,72 @@ export function LocationDetailSheet({
     });
   }, [subviewProgress]);
 
-  const handleCommentAdded = useCallback(
-    (newReview: CommunityReview) => {
-      setCommunityReviews((prev) => {
-        const next = [newReview, ...prev.filter((r) => r.id !== newReview.id)];
-        const ownOnly = next.filter((r) => r.isOwn);
-        void AsyncStorage.setItem(myCommentsStorageKey, JSON.stringify(ownOnly)).catch(() => {});
-        return next;
-      });
-    },
-    [myCommentsStorageKey]
-  );
+  const refreshComments = useCallback(async () => {
+    try {
+      const items = await fetchCommunityComments(place.id);
+      if (Array.isArray(items)) {
+        const remoteMapped: CommunityReview[] = items.map((c) => {
+          const author = c.authorLabel || 'Thành viên cộng đồng';
+          const initials = author.slice(0, 2).toUpperCase();
+          const date = new Date(c.createdAt);
+          const age = Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('vi-VN');
+          return {
+            id: c.id,
+            author,
+            initials,
+            age,
+            helpfulCount: Math.max(1, Math.round((c.recencyWeight || 1) * 10)),
+            likesCount: Math.max(1, Math.round((c.recencyWeight || 1) * 4)),
+            comment: c.body,
+            status: 'Approved',
+            isOwn: Boolean(c.isMine),
+            createdAtIso: c.createdAt,
+            version: c.version ?? 1,
+            isEdited: Boolean(c.isEdited),
+            editableUntilIso: c.editableUntil ?? null,
+            parentCommentId: c.parentCommentId ?? null,
+            replyToAuthorLabel: c.replyToAuthorLabel ?? null,
+          };
+        });
+            reviewsCacheByPlaceId.set(place.id, remoteMapped);
+            setCommunityReviews(remoteMapped);
+            setLoadedCommentsPlaceId(place.id);
+          }
+        } catch {}
+      }, [place.id]);
+
+      const handleCommentAdded = useCallback(
+        (newReview: CommunityReview) => {
+          setCommunityReviews((prev) => {
+            const next = [newReview, ...prev.filter((r) => r.id !== newReview.id)];
+            reviewsCacheByPlaceId.set(place.id, next);
+            return next;
+          });
+        },
+        [place.id]
+      );
+
+      const handleCommentUpdated = useCallback(
+        (updated: CommunityReview) => {
+          setCommunityReviews((prev) => {
+            const next = prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r));
+            reviewsCacheByPlaceId.set(place.id, next);
+            return next;
+          });
+        },
+        [place.id]
+      );
+
+      const handleCommentDeleted = useCallback(
+        (commentId: string) => {
+          setCommunityReviews((prev) => {
+            const next = prev.filter((r) => r.id !== commentId && r.parentCommentId !== commentId);
+            reviewsCacheByPlaceId.set(place.id, next);
+            return next;
+          });
+        },
+        [place.id]
+      );
 
   const handleOpenDirections = useCallback(async () => {
     if (place.lat == null || place.lng == null) {
@@ -852,6 +970,7 @@ export function LocationDetailSheet({
             scrollEnabled={snap !== 'peek'}
             nestedScrollEnabled
             keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets
             showsVerticalScrollIndicator={false}
           >
             <LocationHeader
@@ -936,14 +1055,16 @@ export function LocationDetailSheet({
 
             <View style={styles.sectionInset}>
               <CommunityReviewsSection
-                reviews={communityReviews}
+                reviews={activeReviews}
+                isLoading={effectiveCommentsLoading}
                 onViewAll={openCommentsSection}
                 showDemoContent={hasDemoCommunityContent}
                 isVerified={isFullyVerified}
               />
 
               <EvidenceGallerySection
-                evidence={evidenceList}
+                evidence={activeEvidence}
+                isLoading={effectiveEvidenceLoading}
                 onAddEvidence={() => {
                   if (!user) {
                     setLoginModalFeature('đóng góp ảnh minh chứng');
@@ -993,9 +1114,9 @@ export function LocationDetailSheet({
                   </TouchableOpacity>
                   {timelineExpanded ? (
                     <View style={{ marginTop: 8, gap: 8 }}>
-                      {timelineItems.map((entry) => (
+                      {timelineItems.map((entry, idx) => (
                         <View
-                          key={entry.entryId}
+                          key={`${entry.entryId || 'timeline'}-${idx}`}
                           style={{
                             borderLeftWidth: 2,
                             borderLeftColor: '#0d9488',
@@ -1053,11 +1174,15 @@ export function LocationDetailSheet({
             locationId={place.id}
             locationName={place.name}
             locationCategory={localizedCategory}
-            reviews={communityReviews}
+            reviews={activeReviews}
+            isLoading={effectiveCommentsLoading}
             showDemoContent={hasDemoCommunityContent}
             isVerified={isFullyVerified}
             onBack={closeCommentsSection}
             onCommentAdded={handleCommentAdded}
+            onCommentUpdated={handleCommentUpdated}
+            onCommentDeleted={handleCommentDeleted}
+            onRefreshComments={refreshComments}
             onRequireLogin={(featureLabel) => {
               setLoginModalFeature(featureLabel);
               setShowLoginModal(true);

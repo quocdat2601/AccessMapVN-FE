@@ -195,15 +195,44 @@ export async function fetchLocationTimeline(locationId: string): Promise<PublicT
   return response.items ?? [];
 }
 
+function randomUuidV4(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+function normalizeComment(raw: any): PublicCommunityComment {
+  return {
+    id: String(raw?.commentId ?? raw?.id ?? ''),
+    commentId: raw?.commentId ? String(raw.commentId) : undefined,
+    body: String(raw?.body ?? ''),
+    authorLabel: String(raw?.authorLabel ?? 'Thành viên cộng đồng'),
+    createdAt: String(raw?.createdAt ?? new Date().toISOString()),
+    recencyWeight: numberOr(raw?.recencyWeight, 1),
+    isRecentContext: Boolean(raw?.isRecentContext),
+    version: typeof raw?.version === 'number' ? raw.version : 1,
+    isMine: Boolean(raw?.isMine),
+    isEdited: Boolean(raw?.isEdited),
+    editableUntil: raw?.editableUntil ? String(raw.editableUntil) : null,
+    parentCommentId: raw?.parentCommentId ? String(raw.parentCommentId) : null,
+    replyToAuthorLabel: raw?.replyToAuthorLabel ? String(raw.replyToAuthorLabel) : null,
+  };
+}
+
 export async function fetchCommunityComments(
   locationId: string,
   pageSize = 20
 ): Promise<PublicCommunityComment[]> {
-  const response = await apiClient.get<PublicCommunityCommentPage>(
+  const response = await apiClient.get<{ items?: any[] }>(
     `/api/v1/locations/${encodeURIComponent(locationId)}/comments?pageSize=${pageSize}`,
-    { auth: 'none' }
+    { auth: 'optional' }
   );
-  return response.items ?? [];
+  return Array.isArray(response?.items) ? response.items.map(normalizeComment) : [];
 }
 
 export async function fetchCommunityCommentPage(
@@ -212,13 +241,13 @@ export async function fetchCommunityCommentPage(
   cursor?: string | null
 ): Promise<PublicCommunityCommentPage> {
   const cursorQuery = cursor ? `&cursor=${encodeURIComponent(cursor)}` : '';
-  const response = await apiClient.get<PublicCommunityCommentPage>(
+  const response = await apiClient.get<{ items?: any[]; nextCursor?: string | null }>(
     `/api/v1/locations/${encodeURIComponent(locationId)}/comments?pageSize=${pageSize}${cursorQuery}`,
-    { auth: 'none' }
+    { auth: 'optional' }
   );
   return {
-    items: response.items ?? [],
-    nextCursor: response.nextCursor ?? null,
+    items: Array.isArray(response?.items) ? response.items.map(normalizeComment) : [],
+    nextCursor: response?.nextCursor ?? null,
   };
 }
 
@@ -226,20 +255,100 @@ export async function submitCommunityComment(
   locationId: string,
   body: string,
   userId: string,
-  requestNonce?: string
+  requestNonce?: string,
+  confirmCensored = false,
+  parentCommentId?: string | null
 ): Promise<CreateCommunityCommentResponse> {
   const trimmed = body.trim();
-  const nonce = requestNonce ?? `${Date.now()}-${trimmed.length}`;
+  const nonce = requestNonce ?? `${Date.now()}-${trimmed.length}-${confirmCensored ? 'cens' : 'raw'}`;
   const raw = await apiClient.postIdempotent<any>(
     `/api/v1/locations/${encodeURIComponent(locationId)}/comments`,
-    { body: trimmed },
+    {
+      body: trimmed,
+      ...(confirmCensored ? { confirmCensored: true } : {}),
+      ...(parentCommentId ? { parentCommentId } : {}),
+    },
     `comment:${userId}:${locationId}:${nonce}`,
     { auth: 'required' }
   );
   return {
     commentId: String(raw?.commentId ?? raw?.id ?? `local-${Date.now()}`),
-    status: (raw?.status ?? 'PendingReview') as CreateCommunityCommentResponse['status'],
+    status: (raw?.status ?? 'Approved') as CreateCommunityCommentResponse['status'],
     version: numberOr(raw?.version, 1),
     createdAt: String(raw?.createdAt ?? new Date().toISOString()),
+    wasCensored: Boolean(raw?.wasCensored),
+    matchedTerms: Array.isArray(raw?.matchedTerms) ? raw.matchedTerms.map(String) : undefined,
   };
+}
+
+export async function updateCommunityComment(
+  locationId: string,
+  commentId: string,
+  body: string,
+  expectedVersion?: number,
+  confirmCensored = false
+): Promise<CreateCommunityCommentResponse> {
+  const raw = await apiClient.patch<any>(
+    `/api/v1/locations/${encodeURIComponent(locationId)}/comments/${encodeURIComponent(commentId)}`,
+    {
+      body: body.trim(),
+      ...(typeof expectedVersion === 'number' ? { expectedVersion } : {}),
+      ...(confirmCensored ? { confirmCensored: true } : {}),
+    },
+    {
+      auth: 'required',
+      headers: { 'Idempotency-Key': randomUuidV4() },
+      timeoutMs: 20_000,
+    }
+  );
+  return {
+    commentId: String(raw?.commentId ?? commentId),
+    status: (raw?.status ?? 'Approved') as CreateCommunityCommentResponse['status'],
+    version: numberOr(raw?.version, (expectedVersion ?? 1) + 1),
+    createdAt: String(raw?.createdAt ?? new Date().toISOString()),
+    wasCensored: Boolean(raw?.wasCensored),
+    matchedTerms: Array.isArray(raw?.matchedTerms) ? raw.matchedTerms.map(String) : undefined,
+  };
+}
+
+export async function deleteCommunityComment(
+  locationId: string,
+  commentId: string
+): Promise<void> {
+  await apiClient.delete(
+    `/api/v1/locations/${encodeURIComponent(locationId)}/comments/${encodeURIComponent(commentId)}`,
+    { auth: 'required' }
+  );
+}
+
+export async function reportCommunityComment(
+  locationId: string,
+  input: {
+    commentId: string;
+    reportedCommentVersion: number;
+    category:
+      | 'SpamAdvertising'
+      | 'HarassmentHate'
+      | 'PrivacyThreat'
+      | 'CoordinatedManipulation'
+      | 'Other';
+    description: string;
+  }
+): Promise<void> {
+  await apiClient.post(
+    `/api/v1/locations/${encodeURIComponent(locationId)}/reports`,
+    {
+      targetType: 'Comment',
+      commentId: input.commentId,
+      reportedCommentVersion: input.reportedCommentVersion,
+      reason: 'CommentViolation',
+      commentViolationCategory: input.category,
+      description: input.description.trim(),
+    },
+    {
+      auth: 'required',
+      headers: { 'Idempotency-Key': randomUuidV4() },
+      timeoutMs: 20_000,
+    }
+  );
 }

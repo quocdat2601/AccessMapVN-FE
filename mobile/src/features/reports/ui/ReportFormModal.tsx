@@ -474,7 +474,7 @@ export function ReportFormModal({
 
   return (
     <Modal animationType="slide" onRequestClose={resetAndClose} transparent visible={visible}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.backdrop}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.backdrop}>
         <View style={styles.sheet}>
           {/* Sheet Handle */}
           <View style={styles.handleContainer}>
@@ -500,6 +500,7 @@ export function ReportFormModal({
 
           <ScrollView
             keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scrollContent}
           >

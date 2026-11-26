@@ -1500,9 +1500,9 @@ export default function LoginScreen() {
           if (!isSubmitting) setGoogleProfile(null);
         }}
       >
-        <KeyboardAvoidingView behavior="padding" style={styles.modalBackdrop}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalBackdrop}>
           <View style={styles.modalSheet}>
-            <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <ScrollView keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets showsVerticalScrollIndicator={false}>
               <View style={styles.modalTopRow}>
                 <View style={styles.securityBadge}>
                   <Ionicons name="shield-checkmark" size={13} color="#004E58" />

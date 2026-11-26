@@ -9,6 +9,7 @@ import {
   MapPin,
   MessageSquareWarning,
   Settings2,
+  ShieldAlert,
   ShieldCheck,
   UsersRound,
 } from "lucide-react";
@@ -34,6 +35,7 @@ export const navigationGroups: NavigationGroup[] = [
       { label: "Tranh chấp tiếp cận", href: "/admin/tranh-chap-tiep-can", icon: Gavel },
       { label: "Báo cáo sai lệch", href: "/admin/bao-cao-sai-lech", icon: FileWarning },
       { label: "Bình luận cộng đồng", href: "/admin/binh-luan-cong-dong", icon: MessageSquareWarning },
+      { label: "Báo cáo người dùng", href: "/admin/bao-cao-nguoi-dung", icon: ShieldAlert },
     ],
   },
   {

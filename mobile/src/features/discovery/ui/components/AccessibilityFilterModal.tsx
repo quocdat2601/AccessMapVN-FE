@@ -308,6 +308,7 @@ export function AccessibilityFilterModal({
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={true}
             keyboardShouldPersistTaps="handled"
+            automaticallyAdjustKeyboardInsets
             nestedScrollEnabled={true}
             bounces={true}
             overScrollMode="never"

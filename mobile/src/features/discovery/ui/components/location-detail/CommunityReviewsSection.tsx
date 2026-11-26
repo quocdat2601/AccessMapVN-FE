@@ -1,10 +1,11 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { CommunityReview } from './types';
 
 interface CommunityReviewsSectionProps {
   reviews?: CommunityReview[];
+  isLoading?: boolean;
   onViewAll?: () => void;
   showDemoContent?: boolean;
   isVerified?: boolean;
@@ -92,6 +93,7 @@ export function getDisplayCommunityReviews(
 
 export function CommunityReviewsSection({
   reviews = [],
+  isLoading = false,
   onViewAll,
   showDemoContent = false,
   isVerified = false,
@@ -105,7 +107,9 @@ export function CommunityReviewsSection({
         <View style={styles.headerLeft}>
           <MaterialCommunityIcons name="comment-text-outline" size={17} color="#006874" />
           <Text style={styles.title}>Nhận xét cộng đồng</Text>
-          <Text style={styles.countText}>({displayReviews.length})</Text>
+          {!isLoading || hasReviews ? (
+            <Text style={styles.countText}>({displayReviews.length})</Text>
+          ) : null}
         </View>
         <TouchableOpacity
           onPress={onViewAll}
@@ -115,12 +119,22 @@ export function CommunityReviewsSection({
           accessibilityLabel="Xem tất cả nhận xét cộng đồng"
           activeOpacity={0.75}
         >
-          <Text style={styles.viewAllText}>{hasReviews ? 'Xem tất cả' : 'Viết nhận xét'}</Text>
+          <Text style={styles.viewAllText}>
+            {hasReviews ? 'Xem tất cả' : isLoading ? 'Đang tải...' : 'Viết nhận xét'}
+          </Text>
           <MaterialCommunityIcons name="chevron-right" size={15} color="#006874" />
         </TouchableOpacity>
       </View>
 
-      {!hasReviews ? (
+      {isLoading && !hasReviews ? (
+        <View style={styles.emptyCard}>
+          <ActivityIndicator size="small" color="#006874" />
+          <View style={styles.emptyCopy}>
+            <Text style={styles.emptyTitle}>Đang tải nhận xét cộng đồng...</Text>
+            <Text style={styles.emptyText}>Đang đồng bộ chia sẻ mới nhất tại địa điểm này.</Text>
+          </View>
+        </View>
+      ) : !hasReviews ? (
         <TouchableOpacity
           style={styles.emptyCard}
           onPress={onViewAll}

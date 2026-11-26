@@ -4,7 +4,11 @@ import { apiRequest, type ApiResponse } from "@/shared/api/api-client";
 import type {
   AdminQueueQuery,
   AdminQueueResponse,
+  AdminReportedCommentItem,
+  AdminUserActivity360,
+  AdminUserModerationCase,
   CommentModerationInput,
+  CommentModerationPolicy,
   CommunityCommentQueueItem,
   DisputeDecisionInput,
   DisputeDetail,
@@ -16,12 +20,13 @@ import type {
   ReportTransitionInput,
 } from "../model/types";
 
-function queryString(query: AdminQueueQuery = {}) {
+function queryString(query: AdminQueueQuery & { onlyFlagged?: boolean } = {}) {
   const params = new URLSearchParams();
   if (query.search) params.set("search", query.search);
   if (query.status && query.status !== "All") params.set("status", query.status);
   if (query.page) params.set("page", String(query.page));
   if (query.pageSize) params.set("pageSize", String(query.pageSize));
+  if (query.onlyFlagged) params.set("onlyFlagged", "true");
   const value = params.toString();
   return value ? `?${value}` : "";
 }
@@ -258,12 +263,37 @@ export const communityModerationRepository = {
     );
   },
 
-  async getComments(query: AdminQueueQuery = {}, signal?: AbortSignal) {
+  async getComments(query: AdminQueueQuery & { onlyFlagged?: boolean } = {}, signal?: AbortSignal) {
     try {
       const response = await apiRequest<
-        AdminQueueResponse<CommunityCommentQueueItem> | CommunityCommentQueueItem[]
+        AdminQueueResponse<Record<string, unknown>> | Array<Record<string, unknown>>
       >(`/api/v1/admin/comments${queryString(query)}`, { signal });
-      return normalizeQueue(response.data, query);
+      const normalized = normalizeQueue(response.data, query);
+      return {
+        ...normalized,
+        items: normalized.items.map((raw): CommunityCommentQueueItem => ({
+          id: String(raw.id ?? ""),
+          locationId: String(raw.locationId ?? raw.placeId ?? ""),
+          locationName: raw.locationName
+            ? String(raw.locationName)
+            : raw.placeName
+              ? String(raw.placeName)
+              : undefined,
+          userId: raw.userId ? String(raw.userId) : undefined,
+          authorDisplayName: raw.authorDisplayName ? String(raw.authorDisplayName) : undefined,
+          authorTier: raw.authorTier ? String(raw.authorTier) : undefined,
+          body: String(raw.body ?? raw.content ?? ""),
+          uncensoredBody: raw.uncensoredBody ? String(raw.uncensoredBody) : undefined,
+          matchedBannedTerms: Array.isArray(raw.matchedBannedTerms)
+            ? raw.matchedBannedTerms.map(String)
+            : undefined,
+          wasCensored: Boolean(raw.wasCensored),
+          reportCount: typeof raw.reportCount === "number" ? raw.reportCount : 0,
+          status: (raw.status === "Visible" ? "Approved" : String(raw.status ?? "PendingReview")) as CommunityCommentQueueItem["status"],
+          createdAt: String(raw.createdAt ?? new Date().toISOString()),
+          version: typeof raw.version === "number" ? raw.version : 1,
+        })),
+      };
     } catch (err: unknown) {
       if (!isRouteUnavailable(err)) throw err;
       return normalizeQueue<CommunityCommentQueueItem>([], query);
@@ -281,5 +311,73 @@ export const communityModerationRepository = {
       `/api/v1/admin/locations/${encodeURIComponent(locationId)}/comments/${encodeURIComponent(commentId)}/moderation`,
       { method: "POST", body: input, etag, idempotencyKey },
     );
+  },
+
+  getCommentPolicy(signal?: AbortSignal) {
+    return apiRequest<CommentModerationPolicy>(`/api/v1/admin/settings/comment-moderation`, { signal });
+  },
+
+  saveCommentPolicy(input: CommentModerationPolicy) {
+    return apiRequest<CommentModerationPolicy>(`/api/v1/admin/settings/comment-moderation`, {
+      method: "PUT",
+      body: input,
+    });
+  },
+
+  async getUserModerationCases(
+    query: AdminQueueQuery & { caseType?: string } = {},
+    signal?: AbortSignal,
+  ) {
+    const params = new URLSearchParams();
+    if (query.status && query.status !== "All") params.set("status", query.status);
+    if (query.caseType && query.caseType !== "All") params.set("caseType", query.caseType);
+    if (query.search) params.set("search", query.search);
+    if (query.page) params.set("page", String(query.page));
+    if (query.pageSize) params.set("pageSize", String(query.pageSize));
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    const response = await apiRequest<AdminQueueResponse<AdminUserModerationCase>>(
+      `/api/v1/admin/user-moderation/cases${qs}`,
+      { signal },
+    );
+    return normalizeQueue(response.data, query);
+  },
+
+  getUserActivity360(userId: string, signal?: AbortSignal) {
+    return apiRequest<AdminUserActivity360>(
+      `/api/v1/admin/user-moderation/users/${encodeURIComponent(userId)}/activity`,
+      { signal },
+    );
+  },
+
+  resolveUserModerationCase(
+    caseId: string,
+    input: {
+      action: "Dismiss" | "WarnOnly" | "PenalizeStanding" | "SuspendAccount";
+      reason: string;
+      standingPenalty?: number;
+      hideComment?: boolean;
+    },
+  ) {
+    return apiRequest<{ caseId: string; status: string; code: string }>(
+      `/api/v1/admin/user-moderation/cases/${encodeURIComponent(caseId)}/resolve`,
+      { method: "POST", body: input },
+    );
+  },
+
+  async getReportedComments(
+    query: { status?: string; search?: string; page?: number; pageSize?: number } = {},
+    signal?: AbortSignal,
+  ) {
+    const params = new URLSearchParams();
+    if (query.status && query.status !== "All") params.set("status", query.status);
+    if (query.search) params.set("search", query.search);
+    if (query.page) params.set("page", String(query.page));
+    if (query.pageSize) params.set("pageSize", String(query.pageSize));
+    const qs = params.toString() ? `?${params.toString()}` : "";
+    const response = await apiRequest<AdminQueueResponse<AdminReportedCommentItem>>(
+      `/api/v1/admin/comments/reports${qs}`,
+      { signal },
+    );
+    return normalizeQueue(response.data, query);
   },
 };

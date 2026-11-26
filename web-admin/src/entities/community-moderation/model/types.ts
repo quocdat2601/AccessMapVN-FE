@@ -244,8 +244,14 @@ export interface CommunityCommentQueueItem {
   locationId: string;
   locationName?: string;
   scopeId?: string;
+  userId?: string;
   authorDisplayName?: string;
+  authorTier?: string;
   body: string;
+  uncensoredBody?: string;
+  matchedBannedTerms?: string[];
+  wasCensored?: boolean;
+  reportCount?: number;
   status: CommunityCommentStatus;
   createdAt: string;
   moderatedAt?: string;
@@ -258,4 +264,126 @@ export interface CommentModerationInput {
   decision: "Approve" | "Hide";
   reason: string;
   expectedVersion: number;
+}
+
+export interface CommentModerationPolicy {
+  autoPublishComments: boolean;
+  editWindowMinutes: number;
+  blockExternalLinks: boolean;
+  allowedDomains: string[];
+  bannedKeywords: string[];
+  maxReportsPer10Minutes: number;
+  falseReportAlertThreshold: number;
+  repeatedTargetAlertThreshold: number;
+  autoHideCommentReportCount: number;
+}
+
+export interface AdminUserModerationCase {
+  id: string;
+  caseType: "CensoredProfanityComment" | "RepeatedlyReportedUser" | "ReporterSpamAbuse" | "CommentReported" | string;
+  subjectUserId: string;
+  subjectName: string;
+  subjectEmail: string;
+  subjectAccountStatus: "Active" | "Disabled" | string;
+  subjectStandingScore: number;
+  subjectReputationPoints: number;
+  locationId?: string | null;
+  locationName?: string | null;
+  commentId?: string | null;
+  reportId?: string | null;
+  violationReasons: string[];
+  uncensoredSnapshot?: string | null;
+  censoredSnapshot?: string | null;
+  matchedBannedTerms: string[];
+  severity: "Low" | "Medium" | "High" | "Critical" | string;
+  status: "Open" | "ActionTaken" | "Dismissed" | string;
+  reportCount: number;
+  adminNote?: string | null;
+  standingPenaltyApplied: number;
+  createdAt: string;
+  resolvedAt?: string | null;
+}
+
+export interface AdminUserActivity360 {
+  userId: string;
+  name: string;
+  email: string;
+  accountStatus: string;
+  accountStandingScore: number;
+  reputationPoints: number;
+  contributionAccuracyRate?: number | null;
+  createdAt: string;
+  reportsSentTotal: number;
+  reportsSentValid: number;
+  reportsSentRejected: number;
+  receivedCommentReports: number;
+  censoredCommentViolations: number;
+  openModerationCases: number;
+  submissions: Array<{
+    submissionId: string;
+    businessCode: string;
+    locationName: string;
+    status: string;
+    aiConfidence?: number | null;
+    createdAt: string;
+  }>;
+  comments: Array<{
+    commentId: string;
+    locationId: string;
+    locationName: string;
+    body: string;
+    status: string;
+    version: number;
+    reportCount: number;
+    createdAt: string;
+  }>;
+  reports: Array<{
+    reportId: string;
+    direction: "Sent" | "Received" | string;
+    locationName: string;
+    targetType: string;
+    reason: string;
+    description: string;
+    status: string;
+    createdAt: string;
+  }>;
+  scoreHistory: Array<{
+    historyId: string;
+    scoreType: string;
+    appliedDelta: number;
+    balanceAfter: number;
+    reason: string;
+    appliedAt: string;
+  }>;
+}
+
+export interface AdminCommentReportEntry {
+  reportId: string;
+  reporterId: string;
+  reporterName: string;
+  violationCategory: string;
+  description: string;
+  reportStatus: string;
+  createdAt: string;
+}
+
+export interface AdminReportedCommentItem {
+  commentId: string;
+  locationId: string;
+  locationName: string;
+  locationAddress?: string | null;
+  parentCommentId?: string | null;
+  parentCommentBody?: string | null;
+  parentAuthorName?: string | null;
+  authorId: string;
+  authorName: string;
+  authorEmail: string;
+  commentBody: string;
+  uncensoredBody?: string | null;
+  matchedBannedTerms: string[];
+  commentStatus: "Visible" | "Hidden" | "PendingReview" | string;
+  commentVersion: number;
+  createdAt: string;
+  reportCount: number;
+  reports: AdminCommentReportEntry[];
 }
