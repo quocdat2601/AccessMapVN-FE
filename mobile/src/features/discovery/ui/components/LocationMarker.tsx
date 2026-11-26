@@ -63,8 +63,9 @@ export function LocationMarker({ poi, onPress }: LocationMarkerProps) {
       style={[styles.markerContainer, { left: `${poi.xPercent}%`, top: `${poi.yPercent}%` }]}
       onPress={() => onPress(poi.id)}
       activeOpacity={0.8}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
       accessibilityRole="button"
-      accessibilityLabel={poi.name}
+      accessibilityLabel={poi.badgeLabel ? `${poi.name}, ${poi.badgeLabel}` : poi.name}
     >
       <View style={styles.poiRow}>
         <View style={[styles.poiIconCircle, { backgroundColor: badgeColor }]}>
@@ -92,6 +93,9 @@ const styles = StyleSheet.create({
   markerContainer: {
     position: 'absolute',
     transform: [{ translateX: -40 }, { translateY: -20 }],
+    minWidth: 48,
+    minHeight: 48,
+    justifyContent: 'center',
     zIndex: 6,
   },
   // Selected Pill Styles

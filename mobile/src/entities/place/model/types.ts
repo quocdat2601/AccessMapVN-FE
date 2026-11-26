@@ -53,6 +53,8 @@ export interface PlaceDto {
   has_accessible_parking?: boolean | null;
   has_step_free?: boolean | null;
   last_verified_at?: string | null;
+  review_count?: number;
+  report_count?: number;
   isAddressLoading?: boolean;
   legacy_feature_values?: {
     ramp: boolean | null;

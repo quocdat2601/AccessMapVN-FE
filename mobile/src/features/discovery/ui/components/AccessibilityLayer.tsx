@@ -133,6 +133,9 @@ export function AccessibilityLayer({
       const isRated = normalizedScore >= 0;
       const accessColor = isRated ? getAccessibilityColor(normalizedScore) : '#94a3b8';
       const icon = categoryToSpriteIcon(p.category);
+      const reviewCount = Number(p.review_count ?? 0);
+      const reportCount = Number(p.report_count ?? 0);
+      const badgeText = reportCount > 0 ? `!${reportCount}` : reviewCount > 0 ? `${reviewCount}` : '';
 
       return {
         type: 'Feature' as const,
@@ -149,6 +152,10 @@ export function AccessibilityLayer({
           isRated,
           accessColor,
           icon,
+          reviewCount,
+          reportCount,
+          hasConflictPin: reportCount > 0,
+          badgeText,
           isSelected: p.id === selectedPlaceId,
         },
       };
@@ -331,6 +338,27 @@ export function AccessibilityLayer({
           textHaloColor: '#ffffff',
           textHaloWidth: 2,
           textHaloBlur: 0.5,
+        }}
+      />
+
+      {/* 7. Rated Places: Compact Review / Report Count Badge */}
+      <MapLibreGL.Layer
+        type="symbol"
+        id="places-rated-count-badge"
+        minZoomLevel={13}
+        filter={['all', ['==', ['get', 'isRated'], true], ['!=', ['get', 'badgeText'], '']]}
+        layout={{
+          textField: ['get', 'badgeText'],
+          textSize: 10,
+          textFont: ['Noto Sans Bold'],
+          textOffset: [0.95, -0.95],
+          textAnchor: 'center',
+          textAllowOverlap: true,
+        }}
+        paint={{
+          textColor: ['case', ['get', 'hasConflictPin'], '#be123c', '#004e58'],
+          textHaloColor: '#ffffff',
+          textHaloWidth: 2,
         }}
       />
     </MapLibreGL.GeoJSONSource>

@@ -56,6 +56,8 @@ export function AccessibilitySummary({
     : null;
 
   const verified = Boolean(isFullyVerified);
+  const clampedTrust = Math.max(0, Math.min(100, Math.round(trustPercent)));
+  const showConfidenceBar = clampedTrust > 0;
   const activeAdvisory = features.find((f) => f.advisory)?.advisory ?? null;
   const hasConflict = features.some(
     (f) => f.communityLabel === 'ConflictReported' || f.communityLabel === 'CommunityUnderReview'
@@ -63,6 +65,15 @@ export function AccessibilitySummary({
   const hasReinforced = features.some(
     (f) => f.communityLabel === 'Reinforced' || f.communityLabel === 'Fresh'
   );
+  const confidenceLevelLabel =
+    clampedTrust >= 80 ? 'Cao' : clampedTrust >= 60 ? 'Trung bình' : 'Cần kiểm chứng';
+  const confidenceBarColor = hasConflict
+    ? '#BE123C'
+    : clampedTrust >= 80
+    ? '#007D78'
+    : clampedTrust >= 60
+    ? '#0F766E'
+    : '#B45309';
   const totalConfirmations = features.reduce((sum, f) => sum + (f.eligibleVoterCount ?? 0), 0);
   const surveyedCount = features.filter((f) => f.publishedStatus !== 'Unknown').length;
   const limitedCount = features.filter(
@@ -149,6 +160,31 @@ export function AccessibilitySummary({
             </View>
           ) : null}
         </View>
+
+        {showConfidenceBar && (
+          <View
+            accessible
+            accessibilityRole="progressbar"
+            accessibilityLabel={`Độ tin cậy dữ liệu tiếp cận ${clampedTrust}%, mức ${confidenceLevelLabel}`}
+            accessibilityValue={{ min: 0, max: 100, now: clampedTrust, text: `${clampedTrust}%` }}
+            style={styles.confidenceBarContainer}
+          >
+            <View style={styles.confidenceHeaderRow}>
+              <Text style={styles.confidenceTitle}>Độ tin cậy dữ liệu</Text>
+              <Text style={[styles.confidenceValue, { color: confidenceBarColor }]}>
+                {clampedTrust}% · {confidenceLevelLabel}
+              </Text>
+            </View>
+            <View style={styles.confidenceTrack}>
+              <View
+                style={[
+                  styles.confidenceFill,
+                  { width: `${clampedTrust}%`, backgroundColor: confidenceBarColor },
+                ]}
+              />
+            </View>
+          </View>
+        )}
 
         {/* Verification Date & Community Consensus Summary */}
         <View style={styles.dateRow}>
@@ -237,6 +273,8 @@ export function AccessibilitySummary({
             return (
               <View
                 key={feature.id}
+                accessible
+                accessibilityLabel={`${shortLabel}: ${statusText}${consensusHint ? `, ${consensusHint}` : ''}`}
                 style={[
                   styles.featureTile,
                   isCompliant && styles.tileCompliant,
@@ -308,8 +346,10 @@ export function AccessibilitySummary({
           <Pressable
             style={({ pressed }) => [styles.recheckActionRow, pressed && styles.pressedRow]}
             onPress={onHelpConfirmPress}
+            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
             accessibilityRole="button"
             accessibilityLabel="Xác nhận hoặc báo thay đổi tiện ích"
+            accessibilityHint="Mở bảng xác nhận hoặc báo thay đổi tiện ích tiếp cận"
           >
             <View style={styles.recheckActionLeft}>
               <MaterialCommunityIcons name="clipboard-check-outline" size={16} color="#0F766E" />
@@ -465,6 +505,36 @@ const styles = StyleSheet.create({
   },
   scoreLabelWarning: {
     color: '#B45309',
+  },
+  confidenceBarContainer: {
+    marginTop: 2,
+    marginBottom: 8,
+    gap: 5,
+  },
+  confidenceHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  confidenceTitle: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  confidenceValue: {
+    fontSize: 11.5,
+    fontWeight: '800',
+  },
+  confidenceTrack: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#E2E8F0',
+    overflow: 'hidden',
+  },
+  confidenceFill: {
+    height: '100%',
+    borderRadius: 999,
   },
   suitabilityCard: {
     flexDirection: 'row',
@@ -633,7 +703,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   recheckActionRow: {
-    minHeight: 44,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

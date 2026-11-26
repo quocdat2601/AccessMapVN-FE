@@ -90,6 +90,10 @@ function mapPlaceDto(p: any, defaultScoreOnHasData = 80): PlaceDto {
       p.hasStepFree ?? p.has_step_free ?? hasRamp ?? p.has_ramp ?? p.doorWidthOk ?? p.door_width_ok
     ),
     last_verified_at: featuresList[0]?.verifiedAt ?? p.lastVerifiedAt ?? p.last_verified_at ?? null,
+    review_count: Number(
+      p.reviewCount ?? p.review_count ?? p.confirmationsCount ?? p.evidenceCount ?? (featuresList.length > 0 ? featuresList.length : 0)
+    ),
+    report_count: Number(p.reportCount ?? p.report_count ?? p.activeDisputeCount ?? p.disputeCount ?? 0),
     legacy_feature_values: {
       ramp: featuresList.length > 0 ? hasRamp : nullableBoolean(p.hasRamp, p.has_ramp),
       entranceDoor: hasDoor,
