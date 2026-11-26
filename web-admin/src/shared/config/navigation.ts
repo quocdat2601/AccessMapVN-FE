@@ -53,14 +53,6 @@ export const navigationGroups: NavigationGroup[] = [
   },
 ];
 
-export const placeholderPageMeta = Object.fromEntries(
-  navigationGroups.flatMap((group) =>
-    group.items
-      .filter((item) => item.href !== "/admin")
-      .map((item) => [item.href.split("/").at(-1)!, { title: item.label, icon: item.icon }]),
-  ),
-) as Record<string, { title: string; icon: LucideIcon }>;
-
 export const platformName = "AccessMapVN";
 export const regionLabel = "TP.HCM & Hà Nội";
 export const trustBadgeIcon = ShieldCheck;

@@ -3,6 +3,8 @@ import { Platform } from 'react-native';
 import { apiClient } from '@/shared/api/client';
 import type { BoundingBox, GeocodeResult, PlaceDto, PoiCategory } from '../model/types';
 
+const ENABLE_MOCK_ACCESSIBILITY = process.env.EXPO_PUBLIC_ENABLE_MOCK_ACCESSIBILITY === 'true';
+
 function nullableBoolean(...values: unknown[]): boolean | null {
   const value = values.find((candidate) => candidate !== undefined && candidate !== null);
   return value == null ? null : Boolean(value);
@@ -16,9 +18,10 @@ function isVideoUrl(rawUrl?: string | null): boolean {
 function mapPlaceDto(p: any, defaultScoreOnHasData = 80): PlaceDto {
   const featuresList = Array.isArray(p.features) ? p.features : [];
   const hasRealAccessibility = Boolean(p.hasAccessibilityData || featuresList.length > 0);
+  const useMockAccessibility = !hasRealAccessibility && ENABLE_MOCK_ACCESSIBILITY;
 
   // Fallback: Mock feature tiếp cận cho địa điểm thật (từ OSM/Search) chưa có khảo sát
-  // Dùng id hash để các thuộc tính cố định theo từng quán, phục vụ test filter
+  // Dùng id hash để các thuộc tính cố định theo từng quán, phục vụ test filter khi bật env flag
   const charSum = String(p.locationId ?? p.id ?? '0')
     .split('')
     .reduce((acc, c) => acc + c.charCodeAt(0), 0);
@@ -35,18 +38,18 @@ function mapPlaceDto(p: any, defaultScoreOnHasData = 80): PlaceDto {
         String(f.currentStatus ?? '').toLowerCase() === 'available'
     );
 
-  const hasRamp = hasRealAccessibility
-    ? hasFeature('Ramp') || Boolean(p.hasRamp ?? p.has_ramp)
-    : mockRamp;
-  const hasElevator = hasRealAccessibility
-    ? hasFeature('Elevator') || Boolean(p.hasAccessibleElevator ?? p.has_accessible_elevator ?? p.has_elevator)
-    : mockElevator;
-  const hasRestroom = hasRealAccessibility
-    ? hasFeature('AccessibleRestroom') || Boolean(p.hasAccessibleRestroom ?? p.has_accessible_restroom)
-    : mockRestroom;
-  const hasDoor = hasRealAccessibility
-    ? hasFeature('EntranceDoor') || nullableBoolean(p.doorWidthOk, p.door_width_ok)
-    : mockDoor;
+  const hasRamp = useMockAccessibility
+    ? mockRamp
+    : hasFeature('Ramp') || Boolean(p.hasRamp ?? p.has_ramp);
+  const hasElevator = useMockAccessibility
+    ? mockElevator
+    : hasFeature('Elevator') || Boolean(p.hasAccessibleElevator ?? p.has_accessible_elevator ?? p.has_elevator);
+  const hasRestroom = useMockAccessibility
+    ? mockRestroom
+    : hasFeature('AccessibleRestroom') || Boolean(p.hasAccessibleRestroom ?? p.has_accessible_restroom);
+  const hasDoor = useMockAccessibility
+    ? mockDoor
+    : hasFeature('EntranceDoor') || nullableBoolean(p.doorWidthOk, p.door_width_ok);
 
   const rawScore =
     typeof p.accessibilityScore === 'number'
@@ -55,7 +58,9 @@ function mapPlaceDto(p: any, defaultScoreOnHasData = 80): PlaceDto {
       ? p.accessibility_score
       : hasRealAccessibility
       ? defaultScoreOnHasData
-      : mockScore;
+      : useMockAccessibility
+      ? mockScore
+      : -1;
 
   return {
     id: String(p.locationId ?? p.id ?? ''),

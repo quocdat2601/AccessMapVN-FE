@@ -357,6 +357,8 @@ function LeaderboardPodium({ top3 }: LeaderboardPodiumProps) {
   );
 }
 
+const ENABLE_MOCK_FALLBACK = __DEV__ && process.env.EXPO_PUBLIC_ENABLE_MOCK_ACCESSIBILITY === 'true';
+
 export interface LeaderboardContentProps {
   isGuest: boolean;
   onStartContribution?: () => void;
@@ -365,7 +367,7 @@ export interface LeaderboardContentProps {
 export function LeaderboardContent({ isGuest, onStartContribution }: LeaderboardContentProps) {
   const router = useRouter();
   const { userProfile } = useAuth();
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(FALLBACK_LEADERBOARD);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [myRep, setMyRep] = useState<MyReputationResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -422,11 +424,10 @@ export function LeaderboardContent({ isGuest, onStartContribution }: Leaderboard
             }))
           );
         } else {
-          setLeaderboard(FALLBACK_LEADERBOARD);
+          setLeaderboard([]);
         }
       } else {
-        // Fallback to rich mock data
-        setLeaderboard(FALLBACK_LEADERBOARD);
+        setLeaderboard(ENABLE_MOCK_FALLBACK ? FALLBACK_LEADERBOARD : []);
       }
 
       // Process Reputation

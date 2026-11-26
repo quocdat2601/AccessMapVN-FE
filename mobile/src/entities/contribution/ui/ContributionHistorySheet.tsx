@@ -59,40 +59,6 @@ function formatFeatureTag(tag: string): string {
   return FEATURE_LABEL_MAP[tag] ?? tag;
 }
 
-const FALLBACK_DEMO_ITEMS: ContributionSubmissionRecord[] = [
-  {
-    id: 'sub-s901-01',
-    locationId: 's9.01',
-    locationName: 'Tòa S9.01 - The Origami',
-    mediaUri: 'https://images.unsplash.com/photo-1577495508048-b635879837f1?w=400',
-    mediaType: 'photo',
-    featureTags: ['Ram dốc', 'Thang máy'],
-    textDescription: 'Lối vào sảnh chính có ram dốc đối chiếu QCVN 10:2024/BXD',
-    status: 'Published',
-    confidenceScore: 0.94,
-    pointsAwarded: 5,
-    createdAt: Date.now() - 86400000 * 2,
-    revision: 1,
-    resubmissionCount: 0,
-  },
-  {
-    id: 'sub-s901-02',
-    locationId: 's9.01-highland',
-    locationName: 'Highland Coffee - Sảnh S9.01',
-    mediaUri: 'https://images.unsplash.com/photo-1554118811-1e0d58224f24?w=400',
-    mediaType: 'photo',
-    featureTags: ['Cửa rộng >90cm', 'Ram dốc'],
-    textDescription: 'Cửa ra vào rộng rãi, có ram dốc thoai thoải',
-    status: 'AwaitingMoreInfo',
-    confidenceScore: 0.72,
-    pointsAwarded: 0,
-    createdAt: Date.now() - 3600000 * 4,
-    revision: 1,
-    resubmissionCount: 0,
-    moderatorNote: 'Ảnh chụp ram dốc bị khuất góc bồn hoa. Vui lòng chụp bổ sung góc nghiêng thấy rõ toàn bộ độ dốc lối đi.',
-  },
-];
-
 export function ContributionHistorySheet({ visible, onClose }: ContributionHistorySheetProps) {
   const [items, setItems] = useState<ContributionSubmissionRecord[]>([]);
   const [ownerRep, setOwnerRep] = useState<{
