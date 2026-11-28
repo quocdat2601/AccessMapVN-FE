@@ -2,7 +2,7 @@ name: Auto-Deploy Web Admin to Vercel
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
     paths:
       - 'web-admin/**'
       - '.github/workflows/deploy-web-admin.yml'
