@@ -1,0 +1,68 @@
+name: Auto-Deploy Web Admin to Vercel
+
+on:
+  push:
+    branches: [main, dev]
+    paths:
+      - 'web-admin/**'
+      - '.github/workflows/deploy-web-admin.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web-admin-vercel
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify-web-admin:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_anon_ci_placeholder
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:5267
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web-admin/package-lock.json
+      - run: npm ci --prefix web-admin
+      - run: npm run check:web
+      - run: npm run test:web
+      - run: npm run build:web
+
+  deploy-vercel:
+    needs: [verify-web-admin]
+    if: ${{ success() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify Vercel secrets are configured
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "Missing VERCEL_TOKEN, VERCEL_ORG_ID, or VERCEL_PROJECT_ID repository secrets." >&2
+            exit 1
+          fi
+      - name: Pull, build, and deploy web-admin to Vercel Production
+        working-directory: web-admin
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          npx --yes vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
+          npx --yes vercel@latest build --prod --token="$VERCEL_TOKEN"
+          npx --yes vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+      - name: Smoke check live Web Admin
+        run: curl -fsS --max-time 15 https://accessmapvn-web-admin.vercel.app >/dev/null
